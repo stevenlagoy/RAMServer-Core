@@ -2,4 +2,3 @@
 // Server core does not directly interpret game rules
 // Delegate rules decisions to a Game implementation
 package game
-

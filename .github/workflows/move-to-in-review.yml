@@ -1,27 +1,32 @@
 name: Move Issue to In Review
+
 on:
   push:
     branches:
-      - '**' # Runs on all branches when you push a commit
+      - '**'
 
 jobs:
   move-issue:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
       - name: Check Commit Message for Issue ID
         id: check_msg
         run: |
-          # Looks for "Review #123" (case-insensitive) in the latest commit message
           COMMIT_MSG=$(git log -1 --pretty=%B)
           if [[ "$COMMIT_MSG" =~ [Rr]eview[[:space:]]+#([0-9]+) ]]; then
-            echo "issue_number=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
-            echo "found=true" >> $GITHUB_OUTPUT
+            echo "issue_number=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Move Issue on Project Board
         if: steps.check_msg.outputs.found == 'true'
         uses: alex-page/github-project-automation-plus@v0.8.3
         with:
-          project: "YOUR_PROJECT_NAME" # Change to your exact Project Name
-          column: "In Review"          # Change to your exact column name
+          project: "YOUR_PROJECT_NAME"
+          column: "In Review"
           repo-token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
