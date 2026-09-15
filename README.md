@@ -44,7 +44,7 @@ go install github.com/bufbuild/buf/cmd/buf@latest
 
 If `buf` is not found afterward, add Go's bin directory to your Path:
 
-- **Linux / maxOS**: `export PATH="$PATH:$(go env GOPATH)/bin"` in your shell profile
+- **Linux / macOS**: `export PATH="$PATH:$(go env GOPATH)/bin"` in your shell profile
 - **Windows**: add `%USERPROFILE%\go\bin` to your PATH environment variable
 
 ## Getting started
