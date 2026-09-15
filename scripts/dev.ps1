@@ -11,7 +11,7 @@ Set-Location (Join-Path $PSScriptRoot '..')
 switch ($Command) {
     'generate' { buf generate }
     'lint'     { buf lint; Push-Location server; go vet ./...; Pop-Location }
-    'test'     { Push-Location server; go test ./...; Pop-Location }
+    'test'     { Push-Location server; go test -race ./...; Pop-Location }
     'build'    { Push-Location server; go build ./...; Pop-Location }
     'up'       { docker compose up --build }
     'down'     { docker compose down }
