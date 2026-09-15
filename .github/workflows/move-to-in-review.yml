@@ -1,32 +1,66 @@
-name: Move Issue to In Review
+name: Move linked issue to In Review
+
+# Requires, set once per repo:
+#   Secrets   (Settings → Secrets and variables → Actions → Secrets):
+#     PROJECT_TOKEN        — fine-grained PAT, scoped to this repo only,
+#                            Account permissions: Projects (Read and write)
+#   Variables (Settings → Secrets and variables → Actions → Variables):
+#     PROJECT_NODE_ID       — from: gh project view 3 --owner stevenlagoy --format json
+#     STATUS_FIELD_ID       — from: gh project field-list 3 --owner stevenlagoy --format json
+#     IN_REVIEW_OPTION_ID   — the "In Review" option's id under that Status field
+#
+# Trigger: fires when a PR is opened/reopened/marked ready, and looks for a
+# "Closes #NN" / "Closed #NN" / "Close #NN" reference in the PR body to find
+# the issue to move. A PR with no such reference is skipped, not failed.
 
 on:
-  push:
-    branches:
-      - '**'
+  pull_request:
+    types: [opened, reopened, ready_for_review]
 
 jobs:
   move-issue:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Check Commit Message for Issue ID
-        id: check_msg
+      - name: Extract linked issue number
+        id: extract
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          COMMIT_MSG=$(git log -1 --pretty=%B)
-          if [[ "$COMMIT_MSG" =~ [Rr]eview[[:space:]]+#([0-9]+) ]]; then
-            echo "issue_number=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          BODY=$(gh pr view "${{ github.event.pull_request.number }}" --json body -q .body)
+          if [[ "$BODY" =~ [Cc]los(e|es|ed)[[:space:]]+#([0-9]+) ]]; then
+            echo "issue_number=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
             echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Move Issue on Project Board
-        if: steps.check_msg.outputs.found == 'true'
-        uses: alex-page/github-project-automation-plus@v0.8.3
+      - name: Move issue to In Review
+        if: steps.extract.outputs.found == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
-          project: "YOUR_PROJECT_NAME"
-          column: "In Review"
-          repo-token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const issueNumber = ${{ steps.extract.outputs.issue_number }};
+            const projectId = "${{ vars.PROJECT_NODE_ID }}";
+            const statusFieldId = "${{ vars.STATUS_FIELD_ID }}";
+            const inReviewOptionId = "${{ vars.IN_REVIEW_OPTION_ID }}";
+
+            const issue = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+            });
+
+            const itemId = issue.data.node_id;
+
+            await github.graphql(`
+              mutation($project: ID!, $item: ID!, $field: ID!, $value: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $project,
+                  itemId: $item,
+                  fieldId: $field,
+                  value: { singleSelectOptionId: $value }
+                }) { projectV2Item { id } }
+              }`,
+              { project: projectId, item: itemId, field: statusFieldId, value: inReviewOptionId }
+            );
