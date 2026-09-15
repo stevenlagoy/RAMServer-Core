@@ -1,4 +1,4 @@
-module github.com/RAMServer-Core/ramserver
+module github.com/stevenlagoy/ramserver-core/server
 
 go 1.24
 

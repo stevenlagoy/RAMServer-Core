@@ -19,7 +19,7 @@ A Reusable Authoritative Multiplayer game server core. Game-agnostic server owns
 | Path                | Contents                                    |
 |---------------------|---------------------------------------------|
 | `proto/`            | Wire protocol definitions (source of truth) |
-| `server/`           | Go server code                              |
+| `server/`           | Go server code (`github.com/stevenlagoy/ramserver-core/server`) |
 | `clients/client-1/` | Compiled-language client                    |
 | `clients/client-2/` | Interpreted-language client                 |
 | `docs/`             | Protocol specification and design notes     |
@@ -53,7 +53,7 @@ If `buf` is not found afterward, add Go's bin directory to your Path:
 
 **Linux / maxOS (bash)**
 ```bash
-git clone git@github.com:RAMServer-Core/ramserver-core.git
+git clone https://github.com/stevenlagoy/ramserver-core.git
 cd ramserver-core
 ```
 
