@@ -99,7 +99,7 @@ Notes. The Project Manager records decisions, action items, and owners in the sh
 
 5) The board is kept current at all times. Members update issue status when the status changes rather than in a batch before a meeting.
 
-6) Issues are labeled by subsystem (server, protocol, client-java, client-python, persistence, infra, docs) and by type (feature, bug, test, chore).
+6) Issues are labeled by subsystem (server, protocol, client-1, client-2, persistence, infra, docs) and by type (feature, bug, test, chore).
 
 7) Issues are scoped so that a single issue is completable by one member within roughly one week. Larger work is decomposed by the Project Manager in consultation with the owner.
 
@@ -237,7 +237,7 @@ Commit messages such as 'fix', 'wip', 'update', or 'asdf' are not acceptable on 
 
 1) Code comments explain intent and non-obvious reasoning. Comments that restate the code are removed in review.
 
-2) README files live at the repository root and in each major subdirectory (server/, clients/java/, clients/python/, proto/). The root README covers project purpose, prerequisites, build and run instructions, and links to all other documentation.
+2) README files live at the repository root and in each major subdirectory (server/, clients/client-1/, clients/client-2/, proto/). The root README covers project purpose, prerequisites, build and run instructions, and links to all other documentation.
 
 3) Google Docs are used where collaborative drafting or course formatting requires them. Every such document is linked from the repository, and the repository is the index of record. A document that is not linked from the repository does not exist for the team's purposes.
 
