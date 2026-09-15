@@ -59,7 +59,7 @@ cd ramserver-core
 
 ### 2. Generate protobuf code
 
-Generated code is notcommitted. Run this after cloning and after any change to files under `proto/`. The command is identical on all platforms:
+Generated code is not committed. Run this after cloning and after any change to files under `proto/`. The command is identical on all platforms:
 
 ```
 buf generate
