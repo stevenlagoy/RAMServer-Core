@@ -31,7 +31,7 @@ Install these before doing anything else
 
 | Tool           | Version | Needed for            |
 |----------------|---------|-----------------------|
-| Go             | 1.27+   | Server                |
+| Go             | 1.24+  | Server                |
 | Docker Desktop | current | Running the server    |
 | Git            | 2.40+   | Everything            |
 | buf            | 1.4x    | Regenerating protobuf |
