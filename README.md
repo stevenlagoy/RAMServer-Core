@@ -19,7 +19,7 @@ A Reusable Authoritative Multiplayer game server core. Game-agnostic server owns
 | Path                | Contents                                    |
 |---------------------|---------------------------------------------|
 | `proto/`            | Wire protocol definitions (source of truth) |
-| `server/`           | Go server code                              |
+| `server/`           | Go server code (`github.com/stevenlagoy/ramserver-core/server`) |
 | `clients/client-1/` | Compiled-language client                    |
 | `clients/client-2/` | Interpreted-language client                 |
 | `docs/`             | Protocol specification and design notes     |
@@ -44,7 +44,7 @@ go install github.com/bufbuild/buf/cmd/buf@latest
 
 If `buf` is not found afterward, add Go's bin directory to your Path:
 
-- **Linux / maxOS**: `export PATH="$PATH:$(go env GOPATH)/bin"` in your shell profile
+- **Linux / macOS**: `export PATH="$PATH:$(go env GOPATH)/bin"` in your shell profile
 - **Windows**: add `%USERPROFILE%\go\bin` to your PATH environment variable
 
 ## Getting started
@@ -53,13 +53,13 @@ If `buf` is not found afterward, add Go's bin directory to your Path:
 
 **Linux / maxOS (bash)**
 ```bash
-git clone git@github.com:RAMServer-Core/ramserver-core.git
+git clone https://github.com/stevenlagoy/ramserver-core.git
 cd ramserver-core
 ```
 
 ### 2. Generate protobuf code
 
-Generated code is notcommitted. Run this after cloning and after any change to files under `proto/`. The command is identical on all platforms:
+Generated code is not committed. Run this after cloning and after any change to files under `proto/`. The command is identical on all platforms:
 
 ```
 buf generate
