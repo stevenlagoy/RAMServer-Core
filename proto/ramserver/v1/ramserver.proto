@@ -2,10 +2,10 @@ syntax = "proto3";
 
 package ramserver.v1;
 
-option java_package = "org.ramserver.proto.v1";
-option java_outer_classname = "RamServerProto";
 option go_package = "github.com/RAMServerCore/ramserver/gen/ramserver/v1;ramserverv1";
 option java_multiple_files = true;
+option java_outer_classname = "RamServerProto";
+option java_package = "org.ramserver.proto.v1";
 
 // ClientMessage is any message sent from a client to the server.
 message ClientMessage {
