@@ -263,7 +263,7 @@ Contribution is evidenced by issues owned and closed, commits authored, pull req
 
 ## 13. Amending This Document
 
-Any member may propose an amendment by opening a pull request against docs/team-policies.md. Amendments follow the standard main review rules, which means all four members approve with written reasons. The version number and ratification date at the head of this document are updated with each amendment.
+Any member may propose an amendment by opening a pull request against docs/TEAM-POLICIES.md. Amendments follow the standard main review rules, which means all four members approve with written reasons. The version number and ratification date at the head of this document are updated with each amendment.
 
 ## 14. Open Items
 
