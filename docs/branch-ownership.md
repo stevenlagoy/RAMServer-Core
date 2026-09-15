@@ -1,6 +1,6 @@
 # Branch Ownership
 
-Per [TEAM-POLICIES.md §6.1](../TEAM-POLICIES.md#6-version-control), every branch is owned by at least two team members. `main` is owned by all four.
+Per [TEAM-POLICIES.md §6.1](TEAM-POLICIES.md#6-version-control), every branch is owned by at least two team members. `main` is owned by all four.
 
 | Branch     | Owners                        | Scope               |
 |------------|-------------------------------|---------------------|
