@@ -75,11 +75,11 @@ Every member holds exactly one primary role and two shared roles. Primary roles 
 
 ## 4. Meetings
 
-| Meeting | Cadence | Duration | Led by |
-|---------|---------|----------|--------|
-| Virtual standup | Weekly, Friday 6:00PM | 30 min | Project Manager |
-| Planning / scope review | As scheduled, at minimum once per phase boundary | 45 min | Project Manager |
-| Course standup checkpoints | Per course schedule (2 total) | Per course | Project Manager |
+| Meeting                    | Cadence                                          | Duration   | Led by          |
+|----------------------------|--------------------------------------------------|------------|-----------------|
+| Virtual standup            | Weekly, Friday 6:00PM                            | 30 min     | Project Manager |
+| Planning / scope review    | As scheduled, at minimum once per phase boundary | 60 min     | Project Manager |
+| Course standup checkpoints | Per course schedule (2 total)                    | Per course | Project Manager |
 
 Standup format. Each member reports: work completed since the last standup, work planned before the next, and any blocker. Blockers are converted into kanban items or assigned an owner before the meeting ends. Discussion that involves fewer than all four members is deferred to a follow-up conversation.
 
@@ -180,12 +180,12 @@ Commit messages such as 'fix', 'wip', 'update', or 'asdf' are not acceptable on 
 
 1) Each language follows its own community standard, applied through automated tooling in CI:
 
-| Language | Style standard | Tooling |
-|---|---|---|
-| Go | Effective Go; standard library idioms | gofmt, go vet, golangci-lint |
-| Java | Google Java Style or equivalent, agreed at design phase | Checkstyle or Spotless |
-| Python | PEP 8, PEP 257 | ruff or flake8 + black |
-| Protocol Buffers | Buf style guide | buf lint |
+| Language         | Style standard                                          | Tooling                      |
+|------------------|---------------------------------------------------------|------------------------------|
+| Go               | Effective Go; standard library idioms                   | gofmt, go vet, golangci-lint |
+| Java             | Google Java Style or equivalent, agreed at design phase | Checkstyle or Spotless       |
+| Python           | PEP 8, PEP 257                                          | ruff or flake8 + black       |
+| Protocol Buffers | Buf style guide                                         | buf lint                     |
 
 2) Naming of modules, files, types, and variables follows the conventions of the language in use. Names carry meaning; abbreviations are avoided except for widely understood ones.
 
@@ -269,14 +269,12 @@ Any member may propose an amendment by opening a pull request against docs/team-
 
 The following require a team decision before this document is ratified.
 
-1) Weekly standup day and time [§4](#4-meetings). Not yet set.
-
-2) Fourth primary role (§2.1). Quality and Release Engineer is recommended, since CI, Docker, the test strategy, and the persistence schema all lack a named owner and the project's verification goals depend on them. Alternatives worth considering:
+1) Fourth primary role (§2.1). Quality and Release Engineer is recommended, since CI, Docker, the test strategy, and the persistence schema all lack a named owner and the project's verification goals depend on them. Alternatives worth considering:
     - Game Rules Engineer, owning the reference game plugin and serving as the first consumer of the game-agnostic interface, which tests that interface for genuine reusability.
     - Documentation and Requirements Lead, owning the requirements model and all written deliverables, which reduces the Project Manager's load.
 
-3) Reference game selection, to be finalized during the design phase (per the proposal).
+2) Reference game selection, to be finalized during the design phase (per the proposal).
 
-4) Java style standard, Google Java Style or an alternative (§7).
+3) Java style standard, Google Java Style or an alternative (§7).
 
-5) Ratification date and signatures.
+4) Ratification date and signatures.
