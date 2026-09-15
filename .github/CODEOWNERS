@@ -1,0 +1,9 @@
+# COMMENTED UNTIL DETERMINED - DO NOT COMMIT TO AVOID GIT SHENANIGANS
+
+# server/ + proto/ owned by all team members
+# /server/         @jonehayd @JacobHeffelmire @stevenlagoy @AidanMayo
+# /proto/          @jonehayd @JacobHeffelmire @stevenlagoy @AidanMayo
+
+# clients
+# /clients/client-1/  @jonehayd @JacobHeffelmire @stevenlagoy @AidanMayo
+# /clients/client-2/  @jonehayd @JacobHeffelmire @stevenlagoy @AidanMayo

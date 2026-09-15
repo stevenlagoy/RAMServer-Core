@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package ramserver.v1;
+
+option go_package = "github.com/RAMServerCore/ramserver/gen/ramserver/v1;ramserverv1";
+option java_package = "org.ramserver.proto.v1";
+option java_multiple_files = true;
+
+// ClientMessage is any message sent from a client to the server.
+message ClientMessage {
+  uint64 sequence = 1;
+  oneof payload {
+    Hello hello = 2;
+    SubmitAction submit_action = 3;
+  }
+}
+
+// ServerMessage is any message sent from the server to a client.
+message ServerMessage {
+  uint64 in_reply_to = 1;
+  oneof payload {
+    Welcome welcome = 2;
+    StateUpdate state_update = 3;
+    ActionRejected action_rejected = 4;
+    MatchEnded match_ended = 5;
+  }
+}
+
+message Hello {
+  string client_name = 1;
+  string protocol_version = 2;
+  string game_id = 3;
+}
+
+message Welcome {
+  string session_id = 1;
+  string player_id = 2;
+  string match_id = 3;
+}
+
+// SubmitAction carries a game-specific action. The core does not interpret
+// `encoded_action`; it hands the bytes to the registered game plugin.
+message SubmitAction {
+  string match_id = 1;
+  bytes encoded_action = 2;
+}
+
+// StateUpdate carries a per-player view of the authoritative state, so games
+// with hidden information can withhold what a given player must not see.
+message StateUpdate {
+  string match_id = 1;
+  uint64 state_version = 2;
+  bytes encoded_view = 3;
+  string active_player_id = 4;
+}
+
+message ActionRejected {
+  string match_id = 1;
+  string reason = 2;
+}
+
+message MatchEnded {
+  string match_id = 1;
+  string winner_player_id = 2;
+  bool draw = 3;
+}
