@@ -1,6 +1,6 @@
 # Contributing
 
-Full team policy: [docs/team-policies.md](docs/team-policies.md). This file
+Full team policy: [docs/TEAM-POLICIES.md](docs/TEAM-POLICIES.md). This file
 is the quick-reference version for day-to-day work.
 
 ## Before you start
