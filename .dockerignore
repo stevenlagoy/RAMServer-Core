@@ -1,0 +1,10 @@
+.git
+.github
+docs
+clients
+scripts
+README.md
+CONTRIBUTING.md
+*.md
+*.db
+data/
