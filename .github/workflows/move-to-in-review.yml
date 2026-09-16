@@ -27,7 +27,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BODY=$(gh pr view "${{ github.event.pull_request.number }}" --json body -q .body)
-          if [[ "$BODY" =~ ([Cc]lose|[Cc]loses|[Cc]losed|[Ff]ix|[Ff]ixes|[Ff]ixed|[Rr]esolve|[Rr]esolves|[Rr]esolved)[[:space:]]+#([0-9]+) ]]; then
+          if [[ "$BODY" =~ [Rr]eview(s|ed)?[[:space:]]+#([0-9]+) ]]; then
             echo "issue_number=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
             echo "found=true" >> "$GITHUB_OUTPUT"
           else
@@ -51,7 +51,21 @@ jobs:
               issue_number: issueNumber,
             });
 
-            const itemId = issue.data.node_id;
+            // addProjectV2ItemById is idempotent: if the issue is already on
+            // the project, it returns the existing item instead of creating
+            // a duplicate. This also handles the case where a PR references
+            // an issue that was never manually added to the board.
+            const addResult = await github.graphql(`
+              mutation($project: ID!, $content: ID!) {
+                addProjectV2ItemById(input: {
+                  projectId: $project,
+                  contentId: $content
+                }) { item { id } }
+              }`,
+              { project: projectId, content: issue.data.node_id }
+            );
+
+            const itemId = addResult.addProjectV2ItemById.item.id;
 
             await github.graphql(`
               mutation($project: ID!, $item: ID!, $field: ID!, $value: String!) {
