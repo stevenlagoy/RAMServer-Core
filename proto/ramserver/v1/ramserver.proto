@@ -45,8 +45,8 @@ message ServerMessage {
 // connection. It establishes protocol compatibility before any auth or game
 // logic runs.
 message ConnectRequest {
-  string protocol_version = 1;  // schema version this client was built against, e.g. "1.0.0"
-  string client_name = 2;       // free-text identifier, e.g. "ramserver-java-client"
+  string protocol_version = 1; // schema version this client was built against, e.g. "1.0.0"
+  string client_name = 2; // free-text identifier, e.g. "ramserver-java-client"
 }
 
 message ConnectResponse {
@@ -63,18 +63,18 @@ message ConnectResponse {
 // either newly issued by the server, or proven by presenting a secret token
 // the server previously issued to that same identity.
 message AuthRequest {
-  string display_name = 1;         // shown to other players; not unique, not a credential
+  string display_name = 1; // shown to other players; not unique, not a credential
 
   // Leave both fields below empty to register as a brand-new player.
   // Set both to resume a previous identity (e.g. after a dropped connection).
-  string player_id = 2;            // identity to resume, if any
-  string reconnect_token = 3;      // secret previously issued for player_id; server-verified
+  string player_id = 2; // identity to resume, if any
+  string reconnect_token = 3; // secret previously issued for player_id; server-verified
 }
 
 message AuthResponse {
   bool authenticated = 1;
-  string player_id = 2;            // newly issued, or the resumed id — the identity for this connection from now on
-  string reconnect_token = 3;      // secret for this identity; store client-side only, never echoed to other players
+  string player_id = 2; // newly issued, or the resumed id — the identity for this connection from now on
+  string reconnect_token = 3; // secret for this identity; store client-side only, never echoed to other players
 }
 
 // =============================================================================
@@ -86,8 +86,8 @@ message AuthResponse {
 // game_id, using the constraints declared by that game's registered Ruleset.
 // The first player to join a lobby becomes its host.
 message JoinLobbyRequest {
-  string game_id = 1;   // "tictactoe" | "chess" | "gofish"
-  string lobby_id = 2;  // empty = join any open lobby for game_id, or create one
+  string game_id = 1; // "tictactoe" | "chess" | "gofish"
+  string lobby_id = 2; // empty = join any open lobby for game_id, or create one
 }
 
 message LeaveLobbyRequest {
@@ -108,11 +108,11 @@ message LobbyUpdate {
   string lobby_id = 1;
   string game_id = 2;
   repeated LobbyPlayer players = 3;
-  string host_player_id = 4;  // the one player who may send StartGameRequest
-  int32 min_players = 5;      // echoed from the server's ruleset registry, not client-set
+  string host_player_id = 4; // the one player who may send StartGameRequest
+  int32 min_players = 5; // echoed from the server's ruleset registry, not client-set
   int32 max_players = 6;
   LobbyStatus status = 7;
-  string match_id = 8;        // set once status == LOBBY_STATUS_STARTING; the id to use in ActionRequest
+  string match_id = 8; // set once status == LOBBY_STATUS_STARTING; the id to use in ActionRequest
 }
 
 message LobbyPlayer {
@@ -122,10 +122,10 @@ message LobbyPlayer {
 
 enum LobbyStatus {
   LOBBY_STATUS_UNSPECIFIED = 0;
-  LOBBY_STATUS_WAITING = 1;   // below min_players for game_id
-  LOBBY_STATUS_READY = 2;     // min_players met, below max_players — host may now start manually
-  LOBBY_STATUS_STARTING = 3;  // match initializing, triggered by the host or by reaching max_players
-  LOBBY_STATUS_CLOSED = 4;    // abandoned before starting, or superseded once the match begins
+  LOBBY_STATUS_WAITING = 1; // below min_players for game_id
+  LOBBY_STATUS_READY = 2; // min_players met, below max_players — host may now start manually
+  LOBBY_STATUS_STARTING = 3; // match initializing, triggered by the host or by reaching max_players
+  LOBBY_STATUS_CLOSED = 4; // abandoned before starting, or superseded once the match begins
 }
 
 // =============================================================================
@@ -149,9 +149,9 @@ message ActionRequest {
 // as encoded_action.
 message StateUpdate {
   string match_id = 1;
-  uint64 state_version = 2;       // monotonically increasing; lets a client detect a stale/duplicate broadcast
+  uint64 state_version = 2; // monotonically increasing; lets a client detect a stale/duplicate broadcast
   bytes encoded_view = 3;
-  string active_player_id = 4;    // whose turn it is now
+  string active_player_id = 4; // whose turn it is now
   repeated string player_order = 5; // full turn order for the match; supports >2 players (e.g. Go Fish)
 }
 
@@ -161,20 +161,20 @@ message StateUpdate {
 
 message ErrorResponse {
   ErrorCode code = 1;
-  string message = 2;    // human-readable detail, not meant to be pattern-matched by clients
-  string match_id = 3;   // set if the error is scoped to a specific match/action; empty otherwise
+  string message = 2; // human-readable detail, not meant to be pattern-matched by clients
+  string match_id = 3; // set if the error is scoped to a specific match/action; empty otherwise
 }
 
 enum ErrorCode {
   ERROR_CODE_UNSPECIFIED = 0;
   ERROR_CODE_INVALID_PROTOCOL_VERSION = 1;
-  ERROR_CODE_AUTH_FAILED = 2;            // unknown player_id, or reconnect_token does not match
+  ERROR_CODE_AUTH_FAILED = 2; // unknown player_id, or reconnect_token does not match
   ERROR_CODE_UNKNOWN_GAME = 3;
   ERROR_CODE_LOBBY_FULL = 4;
   ERROR_CODE_LOBBY_NOT_FOUND = 5;
-  ERROR_CODE_LOBBY_ALREADY_STARTED = 6;  // join attempted after status moved to STARTING/CLOSED
-  ERROR_CODE_NOT_LOBBY_HOST = 7;         // StartGameRequest sent by a non-host player
-  ERROR_CODE_LOBBY_NOT_READY = 8;        // StartGameRequest sent before min_players was met
+  ERROR_CODE_LOBBY_ALREADY_STARTED = 6; // join attempted after status moved to STARTING/CLOSED
+  ERROR_CODE_NOT_LOBBY_HOST = 7; // StartGameRequest sent by a non-host player
+  ERROR_CODE_LOBBY_NOT_READY = 8; // StartGameRequest sent before min_players was met
   ERROR_CODE_MATCH_NOT_FOUND = 9;
   ERROR_CODE_OUT_OF_TURN = 10;
   ERROR_CODE_ILLEGAL_ACTION = 11;
@@ -187,7 +187,7 @@ enum ErrorCode {
 
 message MatchResult {
   string match_id = 1;
-  repeated string winner_player_ids = 2;  // empty if draw; more than one entry supports team/tie outcomes
+  repeated string winner_player_ids = 2; // empty if draw; more than one entry supports team/tie outcomes
   bool draw = 3;
   repeated PlayerActionSummary summaries = 4;
 }
