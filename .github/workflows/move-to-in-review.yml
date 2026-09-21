@@ -1,0 +1,80 @@
+name: Move linked issue to In Review
+
+# Requires, set once per repo:
+#   Secrets   (Settings → Secrets and variables → Actions → Secrets):
+#     PROJECT_TOKEN        — fine-grained PAT, scoped to this repo only,
+#                            Account permissions: Projects (Read and write)
+#   Variables (Settings → Secrets and variables → Actions → Variables):
+#     PROJECT_NODE_ID       — from: gh project view 3 --owner stevenlagoy --format json
+#     STATUS_FIELD_ID       — from: gh project field-list 3 --owner stevenlagoy --format json
+#     IN_REVIEW_OPTION_ID   — the "In Review" option's id under that Status field
+#
+# Trigger: fires when a PR is opened/reopened/marked ready, and looks for a
+# "Closes #NN" / "Closed #NN" / "Close #NN" reference in the PR body to find
+# the issue to move. A PR with no such reference is skipped, not failed.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+jobs:
+  move-issue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract linked issue number
+        id: extract
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BODY=$(gh pr view "${{ github.event.pull_request.number }}" --json body -q .body)
+          if [[ "$BODY" =~ [Rr]eview(s|ed)?[[:space:]]+#([0-9]+) ]]; then
+            echo "issue_number=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Move issue to In Review
+        if: steps.extract.outputs.found == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const issueNumber = ${{ steps.extract.outputs.issue_number }};
+            const projectId = "${{ vars.PROJECT_NODE_ID }}";
+            const statusFieldId = "${{ vars.STATUS_FIELD_ID }}";
+            const inReviewOptionId = "${{ vars.IN_REVIEW_OPTION_ID }}";
+
+            const issue = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+            });
+
+            // addProjectV2ItemById is idempotent: if the issue is already on
+            // the project, it returns the existing item instead of creating
+            // a duplicate. This also handles the case where a PR references
+            // an issue that was never manually added to the board.
+            const addResult = await github.graphql(`
+              mutation($project: ID!, $content: ID!) {
+                addProjectV2ItemById(input: {
+                  projectId: $project,
+                  contentId: $content
+                }) { item { id } }
+              }`,
+              { project: projectId, content: issue.data.node_id }
+            );
+
+            const itemId = addResult.addProjectV2ItemById.item.id;
+
+            await github.graphql(`
+              mutation($project: ID!, $item: ID!, $field: ID!, $value: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $project,
+                  itemId: $item,
+                  fieldId: $field,
+                  value: { singleSelectOptionId: $value }
+                }) { projectV2Item { id } }
+              }`,
+              { project: projectId, item: itemId, field: statusFieldId, value: inReviewOptionId }
+            );

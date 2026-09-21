@@ -28,5 +28,32 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# Generated protobuf code
+server/gen/
+clients/client-1/gen/
+clients/client-2/gen/
+
+# Local data
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Python (client-2)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Java (client-1)
+target/
+build/
+*.class

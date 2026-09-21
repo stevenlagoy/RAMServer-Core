@@ -1,0 +1,15 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - "9000:9000"
+    environment:
+      RAMSERVER_ADDR: ":9000"
+    volumes:
+      - ramserver-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  ramserver-data:
