@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net"
 	"sync"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/stevenlagoy/ramserver-core/server/internal/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/match"
+	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
 
 /*
@@ -136,7 +138,7 @@ func Serve(ctx context.Context, listener net.Listener, config ServerConfig) erro
 		case sem <- struct{}{}:
 		default:
 			conn.SetWriteDeadline(time.Now().Add(time.Second))
-			conn.Write([]byte("server full\n"))
+			transport.WriteFrame(conn, transport.EncodeReject(0, errors.New("server full")))
 			conn.Close()
 			release()
 			continue
