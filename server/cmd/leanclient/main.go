@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 )
+
+const defaultAddr = "127.0.0.1:8080"
 
 func writeFrame(w io.Writer, payload []byte) error {
 	buf := make([]byte, 4+len(payload))
@@ -29,7 +32,12 @@ func readFrame(r io.Reader) ([]byte, error) {
 }
 
 func main() {
-	conn, err := net.Dial("tcp", "localhost:8080")
+	addr := os.Getenv("RAMSERVER_ADDR")
+	if addr == "" {
+		addr = defaultAddr
+	}
+
+	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		fmt.Println("Error connecting to server: ", err)
 		return

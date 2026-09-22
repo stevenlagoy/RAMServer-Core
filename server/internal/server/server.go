@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net"
 	"sync"
@@ -77,7 +76,7 @@ func Serve(ctx context.Context, listener net.Listener, config ServerConfig) erro
 		listener.Close() // Unblock Accept()
 	}()
 
-	fmt.Println("Server is running on port 8080")
+	log.Printf("Server is running on %s", listener.Addr())
 
 	var backoff time.Duration // grows while Accept fails
 

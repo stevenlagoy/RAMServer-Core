@@ -4,15 +4,23 @@ import (
 	"context"
 	"log"
 	"net"
+	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/stevenlagoy/ramserver-core/server/internal/server"
 )
 
+const defaultAddr = "127.0.0.1:8080"
+
 func main() {
+	addr := os.Getenv("RAMSERVER_ADDR")
+	if addr == "" {
+		addr = defaultAddr
+	}
+
 	// Create a TCP listener
-	listener, err := net.Listen("tcp", "127.0.0.1:8080") // Bind to loopback to avoid firewall prompt - change later to allow LAN
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatal("Error creating listener:", err)
 	}
