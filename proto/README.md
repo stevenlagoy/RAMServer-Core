@@ -36,11 +36,10 @@ phase has completed.
 - `client_name` — free-text identifier for logging/debugging (e.g.
   `"ramserver-java-client"`).
 
-**`ConnectResponse`**
+**`ConnectResponse`** — sent only on success. On a protocol-version
+mismatch, the server sends `ErrorResponse` (`ERROR_CODE_INVALID_PROTOCOL_VERSION`)
+instead and closes the connection.
 
-- `accepted` — `false` if the protocol version is incompatible. If `false`,
-  an `ErrorResponse` (`ERROR_CODE_INVALID_PROTOCOL_VERSION`) follows and the
-  server closes the connection.
 - `session_id` — server-assigned identifier for this TCP session.
 - `server_protocol_version` — the server's schema version, for client-side logging.
 
@@ -80,10 +79,10 @@ never used to establish who someone is. Identity is handled separately:
 - `player_id` — identity to resume, if any; empty to register new.
 - `reconnect_token` — secret proving ownership of `player_id`; empty to register new.
 
-**`AuthResponse`**
+**`AuthResponse`** — sent only on success. On failure, the server sends
+`ErrorResponse` (`ERROR_CODE_AUTH_FAILED`) instead — unknown `player_id`, or
+a `reconnect_token` that doesn't match.
 
-- `authenticated` — `false` on failure (`ERROR_CODE_AUTH_FAILED`): unknown
-  `player_id`, or a `reconnect_token` that doesn't match.
 - `player_id` — the newly issued or resumed identity.
 - `reconnect_token` — secret for this identity. Store it client-side only
   (e.g. a local config file) if you want to support resuming later.

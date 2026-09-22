@@ -42,8 +42,8 @@ message ConnectRequest {
   string client_name      = 2;
 }
 
+// Sent if connection is successful
 message ConnectResponse {
-  bool   accepted                = 1;
   string session_id              = 2;
   string server_protocol_version = 3;
 }
@@ -55,6 +55,7 @@ message AuthRequest {
   string reconnect_token = 3;
 }
 
+// Sent if authentication is successful
 message AuthResponse {
   bool   authenticated   = 1;
   string player_id       = 2;
