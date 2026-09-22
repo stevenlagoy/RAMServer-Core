@@ -31,7 +31,7 @@ Install these before doing anything else
 
 | Tool           | Version | Needed for            |
 |----------------|---------|-----------------------|
-| Go             | 1.24+  | Server                |
+| Go             | 1.24+   | Server                |
 | Docker Desktop | current | Running the server    |
 | Git            | 2.40+   | Everything            |
 | buf            | 1.4x    | Regenerating protobuf |
@@ -73,20 +73,20 @@ Identical on all platforms:
 docker compose up --build
 ```
 
-The server listens on `localhost:9000`. Stop it with `Ctrl+C` and remove the container with `docker compose down`.
+The server listens on `localhost:8080`. Stop it with `Ctrl+C` and remove the container with `docker compose down`.
 
 ### 4. Run the server without Docker (faster iteration)
 
 **Linux / maxOS (bash)**
 ```bash
 cd server
-go run ./cmd/ramserver --addr :9000
+go run ./cmd/ramserver
 ```
 
 **Windows (cmd)**
 ```cmd
 cd server
-go run .\cmd\ramserver --addr :9000
+go run .\cmd\ramserver
 ```
 
 ### 5. Run the tests
