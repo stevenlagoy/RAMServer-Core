@@ -149,6 +149,58 @@ A lobby holds players waiting for a specific game before a match starts. The ser
 - `winner_player_ids` — empty if `draw` is `true`; can hold more than one id if a game or ruleset supports tied or shared outcomes.
 - `summaries` — per-player counts of accepted versus rejected actions during the match, pulled from the persisted action log. This is useful for the demo and testing requirement to show that illegal actions were rejected.
 
+### Session flow diagram
+
+The sequence below shows a full session for a 2-player match: connect,
+authenticate, join a lobby, play until a match result. `Server` broadcasts
+(`LobbyUpdate`, `StateUpdate`, `MatchResult`) go to every player in the
+lobby/match, not just the sender — shown here as a single arrow to both
+clients for brevity. The illegal-action branch shows the case tested by
+FR-06/FR-07: a rejected action leaves state unchanged and never reaches
+`StateUpdate`.
+
+```mermaid
+sequenceDiagram
+    participant A as Client A
+    participant B as Client B
+    participant S as Server
+
+    A->>S: ConnectRequest
+    S-->>A: ConnectResponse
+    A->>S: AuthRequest
+    S-->>A: AuthResponse (player_id, reconnect_token)
+
+    B->>S: ConnectRequest
+    S-->>B: ConnectResponse
+    B->>S: AuthRequest
+    S-->>B: AuthResponse (player_id, reconnect_token)
+
+    A->>S: JoinLobbyRequest (creates lobby, becomes host)
+    S-->>A: LobbyUpdate (status: WAITING)
+    B->>S: JoinLobbyRequest (same game_id)
+    S-->>A: LobbyUpdate (status: READY)
+    S-->>B: LobbyUpdate (status: READY)
+
+    A->>S: StartGameRequest (host only)
+    S-->>A: LobbyUpdate (status: STARTING, match_id)
+    S-->>B: LobbyUpdate (status: STARTING, match_id)
+    S-->>A: StateUpdate (initial state)
+    S-->>B: StateUpdate (initial state)
+
+    loop until match ends
+        A->>S: ActionRequest (encoded_action)
+        alt legal move
+            S-->>A: StateUpdate (updated state)
+            S-->>B: StateUpdate (updated state)
+        else illegal move
+            S-->>A: ErrorResponse (ERROR_CODE_ILLEGAL_ACTION)
+        end
+    end
+
+    S-->>A: MatchResult
+    S-->>B: MatchResult
+```
+
 ## Design notes
 
 - **`encoded_action` / `encoded_view` stay opaque at the core.** This keeps the networking, lobby, and persistence layers game-agnostic; only the registered `Ruleset` for a match ever deserializes these bytes into a concrete move or state type.
