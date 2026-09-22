@@ -11,7 +11,8 @@ type Sender interface {
 type Game interface {
 	Validate(Action) error
 	Apply(Action)
-	State() any // opaque to server; protocol layer serializes
+	// StateFor returns the game state as a memberID should see it. Games with hidden information use memberID to withhold what that members shouldn't see. Games with no hidden information can ignore this and return the same value for everyone.
+	StateFor(memberID string) any
 }
 
 type Action struct {

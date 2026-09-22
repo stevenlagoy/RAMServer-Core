@@ -18,11 +18,12 @@ import (
 )
 
 type Client struct {
-	connection net.Conn
-	out        chan []byte // buffered: outQueueSize messages. Only writeLoop may call transport.WriteFrame on connection; send messages through this channel instead of writing directly.
-	id         string      // placeholder: player/session ID
-	match      *match.Match
-	config     ServerConfig
+	connection    net.Conn
+	out           chan []byte // buffered: outQueueSize messages. Only writeLoop may call transport.WriteFrame on connection; send messages through this channel instead of writing directly.
+	id            string      // placeholder: player/session ID
+	match         *match.Match
+	config        ServerConfig
+	authenticated bool // true after a successful handshake; readLoop rejects actions while false
 }
 
 func NewClient(conn net.Conn, match *match.Match, config ServerConfig) *Client {
@@ -40,7 +41,7 @@ func (c *Client) Send(message []byte) {
 	select {
 	case c.out <- message:
 	default:
-		log.Printf("%s: send queue full, droping client", c.id)
+		log.Printf("%s: send queue full, dropping client", c.id)
 		c.connection.Close() // Too slow; drop to avoid stalling broadcast
 	}
 }
@@ -73,12 +74,6 @@ func (c *Client) Run(ctx context.Context) {
 		c.writeLoop(connCtx)
 	}()
 
-	member := match.Member{ID: c.id, Sender: c}
-	if !c.match.Register(ctx, member) {
-		return
-	}
-	defer c.match.Unregister(ctx, member) // Runs first
-
 	c.readLoop(connCtx)
 }
 
@@ -109,6 +104,26 @@ func (c *Client) readLoop(ctx context.Context) {
 			continue // Heartbeat
 		}
 		receivedFirst = true
+
+		if !c.authenticated {
+			newID, err := transport.DecodeHello(frame)
+			if err != nil {
+				c.Send(transport.EncodeReject(0, err))
+				continue // Give the client another  chance
+			}
+			c.id = newID
+			c.authenticated = true
+
+			member := match.Member{ID: c.id, Sender: c}
+			if !c.match.Register(ctx, member) {
+				return
+			}
+			defer c.match.Unregister(ctx, member) // runs when readLoop returns; safe, at most once per connection
+
+			c.Send(transport.EncodeWelcome(c.id))
+			continue // Hello frame is not an action
+		}
+
 		action, err := transport.DecodeAction(c, frame)
 		if err != nil {
 			c.Send(transport.EncodeReject(0, err))

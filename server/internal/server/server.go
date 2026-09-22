@@ -5,7 +5,6 @@ import (
 	"log"
 	"net"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/stevenlagoy/ramserver-core/server/internal/game"
@@ -42,19 +41,38 @@ func DefaultConfig() ServerConfig {
 	}
 }
 
-func allowIP(ipCounts *sync.Map, addr net.Addr, max int32) (release func(), ok bool) {
+// ipLimiter caps concurrent connections per source IP
+type ipLimiter struct {
+	mu     sync.Mutex
+	counts map[string]int32
+}
+
+func newIPLimiter() *ipLimiter {
+	return &ipLimiter{counts: make(map[string]int32)}
+}
+
+func (l *ipLimiter) allow(addr net.Addr, max int32) (release func(), ok bool) {
 	host, _, _ := net.SplitHostPort(addr.String())
-	val, _ := ipCounts.LoadOrStore(host, new(int32))
-	counter := val.(*int32)
-	if atomic.AddInt32(counter, 1) > max {
-		atomic.AddInt32(counter, -1)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.counts[host] >= max {
 		return nil, false
 	}
-	return func() { atomic.AddInt32(counter, -1) }, true
+	l.counts[host]++
+
+	return func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		l.counts[host]--
+		if l.counts[host] <= 0 {
+			delete(l.counts, host) // Prevent unbounded growith from IP churn
+		}
+	}, true
 }
 
 func Serve(ctx context.Context, listener net.Listener, config ServerConfig) error {
-	var ipCounts sync.Map // string -> *int32, or a mutex-guarded map
+	ipCounts := newIPLimiter()
 
 	// Semaphore to limit connections
 	sem := make(chan struct{}, config.MaxConnections)
@@ -107,7 +125,7 @@ func Serve(ctx context.Context, listener net.Listener, config ServerConfig) erro
 		}
 		backoff = 0
 
-		release, ok := allowIP(&ipCounts, conn.RemoteAddr(), config.MaxConnectionsOneIP)
+		release, ok := ipCounts.allow(conn.RemoteAddr(), config.MaxConnectionsOneIP)
 		if !ok {
 			conn.Close()
 			continue

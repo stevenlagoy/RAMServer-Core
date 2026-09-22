@@ -84,11 +84,12 @@ func (m *Match) handle(action game.Action) {
 		return
 	}
 	m.game.Apply(action)
-	m.broadcast(transport.EncodeState(m.game.State()))
+	m.broadcast()
 }
 
-func (m *Match) broadcast(message []byte) {
-	for _, member := range m.joined {
-		member.Send(message) // shared slice: read-only
+// Broadcast sends every joined member their own view of the current state. Each member gets a freshly-encoded payload, since StateFor may withhold different information for different members.
+func (m *Match) broadcast() {
+	for id, member := range m.joined {
+		member.Send(transport.EncodeState(m.game.StateFor(id)))
 	}
 }

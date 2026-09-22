@@ -10,7 +10,7 @@ name: Move linked issue to In Review
 #     IN_REVIEW_OPTION_ID   — the "In Review" option's id under that Status field
 #
 # Trigger: fires when a PR is opened/reopened/marked ready, and looks for a
-# "Closes #NN" / "Closed #NN" / "Close #NN" reference in the PR body to find
+# "Reviews #NN" / "Reviewed #NN" / "Review #NN" reference in the PR body to find
 # the issue to move. A PR with no such reference is skipped, not failed.
 
 on:
