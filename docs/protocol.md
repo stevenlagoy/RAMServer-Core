@@ -153,9 +153,11 @@ A lobby holds players waiting for a specific game before a match starts. The ser
 
 The sequence below shows a full session for a 2-player match: connect,
 authenticate, join a lobby, play until a match result. `Server` broadcasts
-(`LobbyUpdate`, `StateUpdate`, `MatchResult`) go to every player in the
-lobby/match, not just the sender — shown here as a single arrow to both
-clients for brevity. The illegal-action branch shows the case tested by
+(`LobbyUpdate`, `StateUpdate`, `MatchResult`) to every player in the
+lobby/match, not just the sender. Once a player authenticates, they request to join a lobby for a game.
+Players cannot choose to join a specific lobby, the server automatically places them in an open lobby.
+If an open lobby is not available the player is placed in a new lobby as the host.
+The illegal-action branch shows the case tested by
 FR-06/FR-07: a rejected action leaves state unchanged and never reaches
 `StateUpdate`.
 
