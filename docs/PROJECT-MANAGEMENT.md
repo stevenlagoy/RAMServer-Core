@@ -6,11 +6,11 @@
 
 **Stories:**
 - **US-1:** AS A CLIENT DEVELOPER, I want a documented message schema (Protocol Buffers `.proto` files) for all client-server messages, so that I can implement a conforming client without reading server source.
-    - **Acceptance:** `.proto` files exist in a shared `/proto/` directory; a markdown doc explains each message type, field, and when it's sent.
+    - **Acceptance:** `.proto` files exist in a shared `/protocol/` directory; a markdown doc explains each message type, field, and when it's sent.
 - **US-2:** AS A CLIENT DEVELOPER, I want defined message types for connecting, authentication, submitting actions, broadcasting state, handling errors, and disconnecting, so that the full match lifecycle is covered.
     - **Acceptance:** (MVP) `ConnectRequest`, `AuthRequest`/`AuthResponse`, `ActionRequest`, `StateUpdate`, `ErrorResponse`, `MatchResult` are defined with versioned schema.
 - **US-3:** AS A PROTOCOL DESIGNER, I want a documented framing/transport convention (length-prefixed messages over TCP), so that partial reads/writes don't corrupt message boundaries.
-    - **Acceptance:** Framing spec is written correctly; both reference clients parse a fuzz-tested stream of concatenated messages correctly.
+    - **Acceptance:** Framing spec is written correctly; both reference clients parse a fuzz-tested stream of concatenanted messages correctly.
 
 ### 2. Server Core
 
