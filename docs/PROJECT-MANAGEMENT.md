@@ -1,5 +1,69 @@
 # Project Management
 
+## Stakeholders
+
+### Development Team
+
+The development team consists of the four software engineers implementing the server and its test clients.
+
+Members of the development team are given one of these primary roles:
+
+#### Project Manager
+- Scopes work items and makes initial task assignments.
+- Schedules and conducts planning meetings; sets and publishes agendas.
+- Maintains the project vision, the requirements model, and the traceability between requirements and open issues.
+- Reviews all documentation for completeness and accuracy before a deliverable is submitted.
+- Owns this policy document and the course deliverable calendar.
+
+#### Protocol Designer
+- Specifies the wire protocol used for client-server communication, including message schemas, versioning rules, and error semantics.
+- Owns the .proto definitions and is a required reviewer on any pull request that modifies them.
+- Produces and maintains protocol documentation sufficient for a developer to write a conforming client without reading the server source.
+- Announces breaking protocol changes in the team Discord before the corresponding pull request is opened.
+
+#### Network Engineer
+- Designs and implements the transport and session layer between server and clients, including connection lifecycle, framing, timeouts, and disconnect handling.
+- Owns the server-side networking module and the shared client-side transport concerns.
+- Defines the reconnection and session-resume behavior if that stretch goal is pursued.
+
+#### Quality and Release Engineer
+- Owns the CI/CD pipeline configuration in .github/workflows/ and the Docker environment definitions (Dockerfile, docker-compose.yml).
+- Defines the test strategy, the required test tiers, and the merge gate criteria in §9.
+- Maintains test fixtures and the adversarial test suite covering illegal, spoofed, and out-of-order client actions.
+- Owns the persistence schema and its migrations, since match and action-log integrity is verified through the same test harness.
+
+All members additionally have these responsibilities:
+
+#### Server Developer
+- Collectively own and develop the server core: state representation, validation interface, rule enforcement, and persistence.
+- No single member is the sole author of any server subsystem. Each subsystem has at least two members familiar with it.
+
+#### Client System Developer
+- Each pair owns one client implementation: one compiled-language client and one interpreted-language client.
+- Each pair interprets the published protocol specification into a language-specific implementation independently, without reusing the other pair's code.
+- Independent implementation is a project goal: it is the evidence that the protocol is genuinely language-agnostic. Pairs should resolve ambiguity by consulting the protocol specification and the Protocol Designer rather than the other pair's source.
+
+There are three reference games planned, each of which will have two phases or clients implemented by different pairs.
+
+#### Reference Game 1: Chess
+
+- **Compiled-Language Client Team:** Jacob Heffelmire and Aidan Mao
+- **Interpreted-Language Client Team:** Hayden Jones and Steven LaGoy
+
+#### Reference Game 2: Tic-Tac-Toe
+
+- **LLM Prompting Team:** Jacob Heffelmire and Hayden Jones
+- **Output Analysis Team:** Steven LaGoy and Aidan Mao 
+
+#### Reference Game 3: Go Fish
+
+- **Client Team:** Jacob Heffelmire and Steven LaGoy
+- **Client Team:** Hayden Jones and Aidan Mao
+
+### Players
+
+Players are people who interact with a game client connected to RAMServer-Core to play a game.
+
 ## Epics
 
 ### 1. Protocol
