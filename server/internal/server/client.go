@@ -20,20 +20,36 @@ import (
 type Client struct {
 	connection    net.Conn
 	out           chan []byte // buffered: outQueueSize messages. Only writeLoop may call transport.WriteFrame on connection; send messages through this channel instead of writing directly.
-	id            string      // placeholder: player/session ID
+	remote        string      // immutable; safe for goroutines
+	idMu          sync.RWMutex
+	id            string // player/session ID; use getID/setID
 	match         *match.Match
 	config        ServerConfig
 	authenticated bool // true after a successful handshake; readLoop rejects actions while false
 }
 
 func NewClient(conn net.Conn, match *match.Match, config ServerConfig) *Client {
+	remote := conn.RemoteAddr().String()
 	return &Client{
 		connection: conn,
 		out:        make(chan []byte, config.OutQueueSize),
-		id:         conn.RemoteAddr().String(),
+		remote:     remote,
+		id:         remote,
 		match:      match,
 		config:     config,
 	}
+}
+
+func (c *Client) getID() string {
+	c.idMu.RLock()
+	defer c.idMu.RUnlock()
+	return c.id
+}
+
+func (c *Client) setID(id string) {
+	c.idMu.Lock()
+	c.id = id
+	c.idMu.Unlock()
 }
 
 // send never blocks. A client with full queue is dropped so it can't stall a broadcast
@@ -41,7 +57,7 @@ func (c *Client) Send(message []byte) {
 	select {
 	case c.out <- message:
 	default:
-		log.Printf("%s: send queue full, dropping client", c.id)
+		log.Printf("%s: send queue full, dropping client", c.getID())
 		c.connection.Close() // Too slow; drop to avoid stalling broadcast
 	}
 }
@@ -53,7 +69,7 @@ func recoverPanic(where string) {
 }
 
 func (c *Client) Run(ctx context.Context) {
-	defer recoverPanic(("client " + c.id)) // Runs last
+	defer recoverPanic(("client " + c.remote)) // Runs last
 
 	connCtx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -69,7 +85,7 @@ func (c *Client) Run(ctx context.Context) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer recoverPanic("writeLoop " + c.id)
+		defer recoverPanic("writeLoop " + c.remote)
 		defer cancel() // write failure ends whole client
 		c.writeLoop(connCtx)
 	}()
@@ -94,9 +110,9 @@ func (c *Client) readLoop(ctx context.Context) {
 			case errors.Is(err, syscall.ECONNRESET):
 				// Client disconnected abruptly (happens in test teardowns): no log
 			case errors.Is(err, os.ErrDeadlineExceeded):
-				log.Printf("%s: read timeout", c.id)
+				log.Printf("%s: read timeout", c.getID())
 			default:
-				log.Printf("%s: read error: %v", c.id, err)
+				log.Printf("%s: read error: %v", c.getID(), err)
 			}
 			return
 		}
@@ -109,18 +125,18 @@ func (c *Client) readLoop(ctx context.Context) {
 			newID, err := transport.DecodeHello(frame)
 			if err != nil {
 				c.Send(transport.EncodeReject(0, err))
-				continue // Give the client another  chance
+				continue // Give the client another chance
 			}
-			c.id = newID
+			c.setID(newID)
 			c.authenticated = true
 
-			member := match.Member{ID: c.id, Sender: c}
+			member := match.Member{ID: newID, Sender: c}
 			if !c.match.Register(ctx, member) {
 				return
 			}
 			defer c.match.Unregister(ctx, member) // runs when readLoop returns; safe, at most once per connection
 
-			c.Send(transport.EncodeWelcome(c.id))
+			c.Send(transport.EncodeWelcome(newID))
 			continue // Hello frame is not an action
 		}
 
@@ -151,7 +167,7 @@ func (c *Client) writeLoop(ctx context.Context) {
 		c.connection.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
 		if err := transport.WriteFrame(c.connection, payload); err != nil {
 			if !errors.Is(err, net.ErrClosed) {
-				log.Printf("%s: write error: %v", c.id, err)
+				log.Printf("%s: write error: %v", c.getID(), err)
 			}
 			return
 		}
