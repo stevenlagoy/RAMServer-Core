@@ -20,7 +20,7 @@ func NewRegistry() *Registry {
 // Make a game available under name. Panics on duplicate names
 func (r *Registry) Register(name string, factory Factory) {
 	if _, exists := r.games[name]; exists {
-		panic(fmt.Sprint("game: duplicate registration for %q", name))
+		panic(fmt.Sprintf("game: duplicate registration for %q", name))
 	}
 	r.games[name] = factory
 }
