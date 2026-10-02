@@ -192,7 +192,7 @@ Person or people who assesses deliverables and the final project demonstration. 
 
 #### Footprint
 
-- **NFR-22:** The database is a single file; an average match record is under 10 KB; retention is configurable.
+- **NFR-25:** The database is a single file; an average match record is under 10 KB; retention is configurable.
 
 ## Use Cases
 
@@ -378,6 +378,29 @@ Person or people who assesses deliverables and the final project demonstration. 
         4. CI reports pass or fail per client.
     - **Postconditions:** A failing client blocks merge.
     - **References:** NFR-16, US-3, US-12, US-16
+- **UC-14:** Configure, run, and stop the server
+    - **Actors:** Client Operator (primary); Connected clients (secondary)
+    - **Preconditions:**  A server image or binary has been built. The host provides a writable location for the SQLite file.
+    - **Actions:** The operator starts the server.
+    - **Main Flow:**
+        1. Operator supplies configuration through environment variables: listen address, heartbeat and idle timeouts, database path, log level, and match retention.
+        2. Operator starts the server.
+        3. Server reads the environment, applies defaults for unset values, and validates every value.
+        4. Server opens the SQLite file, creating it and applying the schema if it does not exist.
+        5. Server registers the available games, begins listening on the configured address, and logs a startup message that lists the effective configuration without secrets.
+        6. Server accepts client connections (UC-1) until a stop is requested.
+        7. Operator requests a stop (SIGINT or SIGTERM, `Ctrl+C`, or `docker compose down`).
+        8. Server stops accepting new connections and sends each connected client a shutdown notice.
+        9. Server terminates every in-progress match with termination reason server shutdown, completes all in-flight persistence writes, and closes the database.
+        10. Server logs a shutdown summary and exits with status 0.
+    **Alternate Flows:**
+        - 3a. Invalid or unparseable configuration value: server logs which variable is invalid, does not start listening, and exits with a nonzero status.
+        - 4a. Database path is missing or not writable: server logs the error and exits with a nonzero status.
+        - 5a. Listen address is already in use: server logs the error and exits with a nonzero status.
+        - 9a. Shutdown exceeds the configured grace period: server logs the matches left unpersisted and exits with a nonzero status. Writes are atomic, so no partial record remains (NFR-6).
+        - 7a. Operator sends a second stop signal during shutdown: server exits immediately, with the same atomicity guarantee as 9a.
+    **Postconditions:** After startup, the server is listening with a valid configuration and an open database. After shutdown, no connections remain, every persisted match record is complete, and the database file is closed cleanly.
+    **References:** FR-6, FR-29, FR-30, NFR-6, NFR-11, NFR-12, NFR-13, NFR-25, US-17
 
 ## User Stories
 
@@ -438,5 +461,3 @@ Person or people who assesses deliverables and the final project demonstration. 
     - **Acceptance:** GitHub Actions workflow runs on all four tiers; a failing tier blocks merge.
 - **US-17:** AS A DEVELOPER, I want a Docker environment definition, so that the server and clients run identically on every teammate's machine (Windows or Linux).
     - **Acceptance:** `docker-compose` brings up the server; setup docs include cmd, PowerShell, and Linux instructions.
-
-## Traceability Matrix
