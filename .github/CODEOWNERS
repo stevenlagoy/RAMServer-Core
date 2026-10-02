@@ -1,9 +1,11 @@
-# COMMENTED UNTIL DETERMINED - DO NOT COMMIT TO AVOID GIT SHENANIGANS
+# To add a codeowner, add an entry according to the following format:
+# path/to/directory @GitHubUser OR user@email.com
 
 # server/ + proto/ owned by all team members
-# /server/         @jonehayd @JacobHeffelmire @stevenlagoy @AidanMayo
-# /proto/          @jonehayd @JacobHeffelmire @stevenlagoy @AidanMayo
+# server/         @jonehayd @JacobHeffelmire @stevenlagoy @AidanMayo
+.github/workflows   @AidanMayo
+proto/              @jonehayd
 
 # clients
-# /clients/client-1/  @jonehayd @JacobHeffelmire @stevenlagoy @AidanMayo
-# /clients/client-2/  @jonehayd @JacobHeffelmire @stevenlagoy @AidanMayo
+# clients/client-1/  @jonehayd @JacobHeffelmire @stevenlagoy @AidanMayo
+# clients/client-2/  @jonehayd @JacobHeffelmire @stevenlagoy @AidanMayo
