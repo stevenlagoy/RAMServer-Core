@@ -16,14 +16,19 @@ A Reusable Authoritative Multiplayer game server core. Game-agnostic server owns
 
 ## Repository Layout
 
-| Path                | Contents                                    |
-|---------------------|---------------------------------------------|
-| `proto/`            | Wire protocol definitions (source of truth) |
-| `server/`           | Go server code (`github.com/stevenlagoy/ramserver-core/server`) |
-| `clients/client-1/` | Compiled-language client                    |
-| `clients/client-2/` | Interpreted-language client                 |
-| `docs/`             | Protocol specification and design notes     |
-| `scripts/`          | Developer convenience scripts               |
+| Path                              | Contents                                                         |
+|-----------------------------------|------------------------------------------------------------------|
+| `proto/`                          | Wire protocol definitions (source of truth).                     |
+| `server/cmd/ramserver/`           | Primary server entry point. Run with `go run ./...`.             |
+| `server/cmd/leanclient/`          | Lightweight test client implementation. Run with `go run ./...`. |
+| `server/internal/`                | Go server code (`github.com/stevenlagoy/ramserver-core/server`). |
+| `games/chess/compiled_client/`    | Compiled-language chess client implementations.                  |
+| `games/chess/interpreted_client/` | Interpreted-language chess client implementations.               |
+| `games/gofish/client_1/`          | Go Fish client implementation.                                   |
+| `games/gofish/client_2/`          | Go Fish client implementation.                                   |
+| `games/tictactoe/client/`         | Tic-Tac-Toe client implementation by an LLM.                     |
+| `docs/`                           | Team documentation for project management and communication.     |
+| `scripts/`                        | Developer convenience scripts                                    |
 
 ## Prerequisites
 
