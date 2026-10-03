@@ -21,7 +21,7 @@ Connected to 127.0.0.1:9000
 Enter frame payloads, one per line. Ctrl+C or EOF exits.
 move
 -> FRAME     move
-<- STATE     state 1
+<- REJECT    reject 0: transport: DecodeClientMessage not implemented
 ```
 
 ## Send one frame
