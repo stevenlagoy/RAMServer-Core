@@ -1,4 +1,4 @@
-@startuml
+@startuml use_case_model
 left to right direction
 skinparam packageStyle rectangle
 skinparam usecase {
