@@ -23,7 +23,8 @@ import (
 type Client struct {
 	connection    net.Conn
 	out           chan []byte // buffered: outQueueSize messages. Only writeLoop may call transport.WriteFrame on connection; send messages through this channel instead of writing directly.
-	ID            string      // exported: persists across sessions/matches and used in lobby history
+	id            string      // placeholder: player/session ID
+	match         *match.Match
 	config        ServerConfig
 	games         *game.Registry
 	sessions      *session.SessionStore
@@ -31,21 +32,16 @@ type Client struct {
 	session       *session.Session // nil until CreateLobby or JoinLobby succeed
 }
 
-// Create a new client from the given connection, match, and server configuration
-func NewClient(conn net.Conn, config ServerConfig, games *game.Registry, sessions *session.SessionStore) *Client {
+func NewClient(conn net.Conn, match *match.Match, config ServerConfig) *Client {
 	return &Client{
 		connection: conn,
 		out:        make(chan []byte, config.OutQueueSize),
-		ID:         conn.RemoteAddr().String(), // placeholder until handshake assigns real id
+		id:         conn.RemoteAddr().String(),
+		match:      match,
 		config:     config,
 		sessions:   sessions,
 	}
 }
-
-var (
-	errNotInSession    = errors.New("not currently in a session")
-	errSessionNotFound = errors.New("session not found")
-)
 
 // Send a message to this client.
 // Send does not block flow; clients with full queues are dropped to avoid stalling broadcast
@@ -53,7 +49,7 @@ func (c *Client) Send(message []byte) {
 	select {
 	case c.out <- message:
 	default:
-		log.Printf("%s: send queue full, dropping client", c.ID)
+		log.Printf("%s: send queue full, dropping client", c.id)
 		c.connection.Close() // Too slow; drop to avoid stalling broadcast
 	}
 }
@@ -66,7 +62,7 @@ func recoverPanic(where string) {
 
 // Activates this client and begins the read and write loops
 func (c *Client) Run(ctx context.Context) {
-	defer recoverPanic(("client " + c.ID)) // Runs last
+	defer recoverPanic(("client " + c.id)) // Runs last
 
 	connCtx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -82,7 +78,7 @@ func (c *Client) Run(ctx context.Context) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer recoverPanic("writeLoop " + c.ID)
+		defer recoverPanic("writeLoop " + c.id)
 		defer cancel() // write failure ends whole client
 		c.writeLoop(connCtx)
 	}()
@@ -107,9 +103,9 @@ func (c *Client) readLoop(ctx context.Context) {
 			case errors.Is(err, syscall.ECONNRESET):
 				// Client disconnected abruptly (happens in test teardowns): no log
 			case errors.Is(err, os.ErrDeadlineExceeded):
-				log.Printf("%s: read timeout", c.ID)
+				log.Printf("%s: read timeout", c.id)
 			default:
-				log.Printf("%s: read error: %v", c.ID, err)
+				log.Printf("%s: read error: %v", c.id, err)
 			}
 			return
 		}
@@ -122,12 +118,18 @@ func (c *Client) readLoop(ctx context.Context) {
 			newID, err := transport.DecodeHello(frame)
 			if err != nil {
 				c.Send(transport.EncodeReject(0, err))
-				continue // Give the client another  chance
+				continue // Give the client another chance
 			}
-			c.ID = newID
+			c.id = newID
 			c.authenticated = true
 
-			c.Send(transport.EncodeWelcome(c.ID))
+			member := match.Member{ID: c.id, Sender: c}
+			if !c.match.Register(ctx, member) {
+				return
+			}
+			defer c.match.Unregister(ctx, member) // runs when readLoop returns; safe, at most once per connection
+
+			c.Send(transport.EncodeWelcome(c.id))
 			continue // Hello frame is not an action
 		}
 		c.dispatch(ctx, frame)
@@ -148,7 +150,7 @@ func (c *Client) writeLoop(ctx context.Context) {
 		c.connection.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
 		if err := transport.WriteFrame(c.connection, payload); err != nil {
 			if !errors.Is(err, net.ErrClosed) {
-				log.Printf("%s: write error: %v", c.ID, err)
+				log.Printf("%s: write error: %v", c.id, err)
 			}
 			return
 		}
