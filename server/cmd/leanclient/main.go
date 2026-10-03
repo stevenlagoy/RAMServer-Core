@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	defaultAddr = "127.0.0.1:8080"
+	defaultAddr = "127.0.0.1:9000"
 	maxFrame    = 64 << 10
 )
 
@@ -26,6 +26,10 @@ func writeFrame(w io.Writer, payload []byte) error {
 	copy(buf[4:], payload)
 	_, err := w.Write(buf)
 	return err
+}
+
+func writeHello(conn net.Conn) error {
+	return writeFrame(conn, []byte(`{"token": "hello", "content": "world"}`))
 }
 
 func readFrame(r io.Reader) ([]byte, error) {
