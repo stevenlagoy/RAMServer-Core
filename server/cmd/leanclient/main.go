@@ -28,10 +28,6 @@ func writeFrame(w io.Writer, payload []byte) error {
 	return err
 }
 
-func writeHello(conn net.Conn) error {
-	return writeFrame(conn, []byte(`{"token": "hello", "content": "world"}`))
-}
-
 func readFrame(r io.Reader) ([]byte, error) {
 	var header [4]byte
 	if _, err := io.ReadFull(r, header[:]); err != nil {
