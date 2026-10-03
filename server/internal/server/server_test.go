@@ -57,7 +57,7 @@ func readNonHeartbeatFrame(t *testing.T, conn net.Conn, r *bufio.Reader) ([]byte
 	}
 }
 
-func startTestServer(t *testing.T, cfg ServerConfig) string {
+func startTestServer(t *testing.T, cfg ServerConfig) (string, func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0") // port 0: OS picks a free port, so tests don't collide
 	if err != nil {
@@ -69,13 +69,18 @@ func startTestServer(t *testing.T, cfg ServerConfig) string {
 		defer close(done)
 		Serve(ctx, ln, cfg)
 	}()
-	t.Cleanup(func() { cancel(); <-done })
-	return ln.Addr().String()
+	stop := func() {
+		cancel()
+		_ = ln.Close()
+		<-done
+	}
+	return ln.Addr().String(), stop
 }
 
 func TestSilentClientTimesOut(t *testing.T) {
 	cfg := testConfig()
-	addr := startTestServer(t, cfg)
+	addr, stopServer := startTestServer(t, cfg)
+	defer stopServer()
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -92,7 +97,8 @@ func TestSilentClientTimesOut(t *testing.T) {
 
 // func TestBroadcastReachesAllClients(t *testing.T) {
 // 	cfg := testConfig()
-// 	addr := startTestServer(t, cfg)
+// 	addr, stopServer := startTestServer(t, cfg)
+//  defer stopServer()
 
 // 	a := dialTestClient(t, addr)
 // 	b := dialTestClient(t, addr)
@@ -127,8 +133,9 @@ func TestSilentClientTimesOut(t *testing.T) {
 
 func TestActionRejectedBeforeHandshake(t *testing.T) {
 	cfg := testConfig()
-	addr := startTestServer(t, cfg)
+	addr, stopServer := startTestServer(t, cfg)
 	conn := dialTestClient(t, addr)
+	defer stopServer()
 
 	if err := transport.WriteFrame(conn, []byte("move")); err != nil {
 		t.Fatal(err)
