@@ -15,7 +15,7 @@ Type one payload per line and press Enter. Each line is sent as one length-prefi
 Example:
 
 ```text
-Connected to 127.0.0.1:8080
+Connected to 127.0.0.1:9000
 -> HELLO     leanclient
 <- WELCOME   welcome leanclient
 Enter frame payloads, one per line. Ctrl+C or EOF exits.
@@ -36,7 +36,7 @@ go run ./cmd/leanclient -send "move"
 
 ```text
 -addr string
-      server address (default: RAMSERVER_ADDR, otherwise 127.0.0.1:8080)
+      server address (default: RAMSERVER_ADDR, otherwise 127.0.0.1:9000)
 -hello string
       handshake frame payload (default "leanclient")
 -send string
