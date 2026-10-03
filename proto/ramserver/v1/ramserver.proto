@@ -17,8 +17,8 @@ message ClientMessage {
     AuthRequest auth_request = 3;
     JoinLobbyRequest join_lobby_request = 4;
     LeaveLobbyRequest leave_lobby_request = 5;
-    StartGameRequest start_game_request = 6;
-    ActionRequest action_request = 7;
+    ActionRequest action_request = 6;
+    LobbyActionRequest lobby_action_request = 7;
   }
 }
 
@@ -44,8 +44,8 @@ message ConnectRequest {
 
 // Sent if connection is successful
 message ConnectResponse {
-  string session_id = 2;
-  string server_protocol_version = 3;
+  string session_id = 1;
+  string server_protocol_version = 2;
 }
 
 // Auth request payload.
@@ -57,9 +57,8 @@ message AuthRequest {
 
 // Sent if authentication is successful
 message AuthResponse {
-  bool authenticated = 1;
-  string player_id = 2;
-  string reconnect_token = 3;
+  string player_id = 1;
+  string reconnect_token = 2;
 }
 
 // --- Lobby ---
@@ -73,20 +72,14 @@ message LeaveLobbyRequest {
   string lobby_id = 1;
 }
 
-message StartGameRequest {
-  string lobby_id = 1;
-}
-
 // Lobby state update.
 message LobbyUpdate {
   string lobby_id = 1;
   string game_id = 2;
   repeated LobbyPlayer players = 3;
-  string host_player_id = 4;
-  int32 min_players = 5;
-  int32 max_players = 6;
-  LobbyStatus status = 7;
-  string match_id = 8;
+  LobbyStatus status = 4;
+  string match_id = 5;
+  bytes encoded_lobby_state = 6;
 }
 
 message LobbyPlayer {
@@ -100,6 +93,11 @@ enum LobbyStatus {
   LOBBY_STATUS_READY = 2;
   LOBBY_STATUS_STARTING = 3;
   LOBBY_STATUS_CLOSED = 4;
+}
+
+message LobbyActionRequest {
+  string lobby_id = 1;
+  bytes encoded_lobby_action = 2;
 }
 
 // --- Gameplay ---
@@ -130,15 +128,14 @@ enum ErrorCode {
   ERROR_CODE_INVALID_PROTOCOL_VERSION = 1;
   ERROR_CODE_AUTH_FAILED = 2;
   ERROR_CODE_UNKNOWN_GAME = 3;
-  ERROR_CODE_LOBBY_FULL = 4;
-  ERROR_CODE_LOBBY_NOT_FOUND = 5;
-  ERROR_CODE_LOBBY_ALREADY_STARTED = 6;
-  ERROR_CODE_NOT_LOBBY_HOST = 7;
-  ERROR_CODE_LOBBY_NOT_READY = 8;
-  ERROR_CODE_MATCH_NOT_FOUND = 9;
-  ERROR_CODE_OUT_OF_TURN = 10;
-  ERROR_CODE_ILLEGAL_ACTION = 11;
-  ERROR_CODE_MALFORMED_MESSAGE = 12;
+  ERROR_CODE_LOBBY_NOT_FOUND = 4;
+  ERROR_CODE_LOBBY_ALREADY_STARTED = 5;
+  ERROR_CODE_LOBBY_NOT_READY = 6;
+  ERROR_CODE_LOBBY_POLICY_REJECTED = 7;
+  ERROR_CODE_MATCH_NOT_FOUND = 8;
+  ERROR_CODE_OUT_OF_TURN = 9;
+  ERROR_CODE_ILLEGAL_ACTION = 10;
+  ERROR_CODE_MALFORMED_MESSAGE = 11;
 }
 
 // --- Match completion ---
