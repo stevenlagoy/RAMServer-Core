@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 )
 
 const (
@@ -49,6 +50,8 @@ func readFrame(r io.Reader) ([]byte, error) {
 func frameKind(frame []byte) string {
 	text := string(frame)
 	switch {
+	case len(frame) == 0:
+		return "HEARTBEAT"
 	case strings.HasPrefix(text, "welcome "):
 		return "WELCOME"
 	case strings.HasPrefix(text, "reject "):
@@ -60,15 +63,19 @@ func frameKind(frame []byte) string {
 	}
 }
 
+func getTime() string {
+	return time.Now().Format("2005-01-02 15:04:05")
+}
+
 func logReceived(frame []byte) {
-	fmt.Printf("<- %-9s %s\n", frameKind(frame), frame)
+	fmt.Printf("[%s] <- %-9s %s\n", getTime(), frameKind(frame), frame)
 }
 
 func sendFrame(conn net.Conn, kind string, payload []byte) error {
 	if err := writeFrame(conn, payload); err != nil {
 		return err
 	}
-	fmt.Printf("-> %-9s %s\n", kind, payload)
+	fmt.Printf("[%s] -> %-9s %s\n", getTime(), kind, payload)
 	return nil
 }
 
@@ -80,16 +87,15 @@ func readApplicationFrame(conn net.Conn, reader *bufio.Reader) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		logReceived(frame)
 		if len(frame) == 0 {
-			fmt.Println("<- HEARTBEAT")
 			if err := writeFrame(conn, nil); err != nil {
 				return nil, fmt.Errorf("reply to heartbeat: %w", err)
 			}
-			fmt.Println("-> HEARTBEAT reply")
+			fmt.Printf("[%s] -> HEARTBEAT reply\n", getTime())
 			continue
 		}
 
-		logReceived(frame)
 		return frame, nil
 	}
 }
@@ -149,7 +155,7 @@ func main() {
 		return
 	}
 
-	fmt.Println("Enter frame payloads, one per line. Ctrl+C or EOF exits.")
+	fmt.Println("Enter frame payloads on separate lines. Exit with Ctrl+C or EOF.")
 
 	receiveDone := make(chan error, 1)
 	go func() {
