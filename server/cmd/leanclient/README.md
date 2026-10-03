@@ -16,12 +16,11 @@ Example:
 
 ```text
 Connected to 127.0.0.1:9000
--> HELLO     leanclient
-<- WELCOME   welcome leanclient
-Enter frame payloads, one per line. Ctrl+C or EOF exits.
-move
--> FRAME     move
-<- REJECT    reject 0: transport: DecodeClientMessage not implemented
+[2006-01-02 15:04:05] -> HELLO     leanclient
+[2006-01-02 15:04:05] <- WELCOME   welcome leanclient
+Enter frame payloads on separate lines. Exit with Ctrl+C or EOF.
+[2006-01-02 15:04:05] -> FRAME     move
+[2006-01-02 15:04:05] <- REJECT    reject 0: transport: DecodeClientMessage not implemented
 ```
 
 ## Send one frame
