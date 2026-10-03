@@ -53,7 +53,7 @@ func (c *Client) Send(message []byte) {
 	select {
 	case c.out <- message:
 	default:
-		log.Printf("%s: send queue full, dropping client", c.ID)
+		log.Printf("%s: send queue full, dropping client", c.connection.RemoteAddr().String())
 		c.connection.Close() // Too slow; drop to avoid stalling broadcast
 	}
 }
@@ -66,7 +66,7 @@ func recoverPanic(where string) {
 
 // Activates this client and begins the read and write loops
 func (c *Client) Run(ctx context.Context) {
-	defer recoverPanic(("client " + c.ID)) // Runs last
+	defer recoverPanic(("client " + c.connection.RemoteAddr().String())) // Runs last
 
 	connCtx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -82,7 +82,7 @@ func (c *Client) Run(ctx context.Context) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer recoverPanic("writeLoop " + c.ID)
+		defer recoverPanic("writeLoop " + c.connection.RemoteAddr().String())
 		defer cancel() // write failure ends whole client
 		c.writeLoop(connCtx)
 	}()
