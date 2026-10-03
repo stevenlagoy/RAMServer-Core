@@ -9,7 +9,7 @@ import (
 	"os"
 )
 
-const defaultAddr = "127.0.0.1:8080"
+const defaultAddr = "127.0.0.1:9000"
 
 func writeFrame(w io.Writer, payload []byte) error {
 	buf := make([]byte, 4+len(payload))
@@ -17,6 +17,10 @@ func writeFrame(w io.Writer, payload []byte) error {
 	copy(buf[4:], payload)
 	_, err := w.Write(buf)
 	return err
+}
+
+func writeHello(conn net.Conn) error {
+	return writeFrame(conn, []byte(`{"token": "hello", "content": "world"}`))
 }
 
 func readFrame(r io.Reader) ([]byte, error) {
@@ -44,7 +48,7 @@ func main() {
 	}
 	defer conn.Close()
 
-	if err := writeFrame(conn, []byte(`{"token": "hello", "content": "world"}`)); err != nil {
+	if err := writeHello(conn); err != nil {
 		fmt.Println("Error sending data to server: ", err)
 		return
 	}

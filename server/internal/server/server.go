@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/stevenlagoy/ramserver-core/server/internal/game"
-	"github.com/stevenlagoy/ramserver-core/server/internal/match"
+	"github.com/stevenlagoy/ramserver-core/server/internal/session"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
 
@@ -19,17 +19,19 @@ https://okanexe.medium.com/the-complete-guide-to-tcp-ip-connections-in-golang-12
 https://oneuptime.com/blog/post/2026-01-25-concurrent-tcp-server-10k-connections-go/view
 */
 
+// Configuration values for a server
 type ServerConfig struct {
-	MaxConnections      int
-	ReadTimeout         time.Duration
-	FirstMessageTimeout time.Duration
-	WriteTimeout        time.Duration
-	CloseTimeout        time.Duration
-	PingInterval        time.Duration
-	OutQueueSize        int
-	MaxConnectionsOneIP int32
+	MaxConnections      int           // Maximum number of client connections the server can support
+	ReadTimeout         time.Duration // Duration after which a read from a client will time out
+	FirstMessageTimeout time.Duration // Duration after which a client handshake will time out
+	WriteTimeout        time.Duration // Duration after which a write to a client will time out
+	CloseTimeout        time.Duration // Duration after which a request to close the connection will time out
+	PingInterval        time.Duration // Interval between keep-alive pings sent to a connection
+	OutQueueSize        int           // Number of messages which can be in flight to a client at once: exceeding this will cause the client to be dropped
+	MaxConnectionsOneIP int32         // Maximum connections allowed from the same IP address
 }
 
+// Get the default configuration for a medium-size server
 func DefaultConfig() ServerConfig {
 	return ServerConfig{
 		MaxConnections:      16, // Scale as #matches * 6 + some headroom
@@ -53,6 +55,7 @@ func newIPLimiter() *ipLimiter {
 	return &ipLimiter{counts: make(map[string]int32)}
 }
 
+// Request a new allowed connection to the given IP address
 func (l *ipLimiter) allow(addr net.Addr, max int32) (release func(), ok bool) {
 	host, _, _ := net.SplitHostPort(addr.String())
 
@@ -73,6 +76,7 @@ func (l *ipLimiter) allow(addr net.Addr, max int32) (release func(), ok bool) {
 	}, true
 }
 
+// Start the server and accept incoming connections to the given listener
 func Serve(ctx context.Context, listener net.Listener, config ServerConfig) error {
 	ipCounts := newIPLimiter()
 
@@ -80,15 +84,9 @@ func Serve(ctx context.Context, listener net.Listener, config ServerConfig) erro
 	sem := make(chan struct{}, config.MaxConnections)
 	var wg sync.WaitGroup
 
-	store := match.NewStore()
-	defer store.Wait() // Let in-flight matches finish before Serve returns
-
-	// Single hard-coded match until real matchmaking exists.
-	// Client still needs to look this ID up, so pass it through, not just the *Match.
-	defaultMatch, err := store.Create(ctx, "default", &game.StubGame{})
-	if err != nil {
-		return err
-	}
+	games := game.NewRegistry()
+	games.Register("stub", func() game.Game { return &game.StubGame{} })
+	sessions := session.NewSessionStore()
 
 	go func() {
 		<-ctx.Done()
@@ -150,11 +148,12 @@ func Serve(ctx context.Context, listener net.Listener, config ServerConfig) erro
 			defer wg.Done()
 			defer func() { <-sem }() // Release slot when done
 			defer release()
-			NewClient(conn, defaultMatch, config).Run(ctx)
+			NewClient(conn, config, games, sessions).Run(ctx)
 		}(ctx, conn)
 	}
 }
 
+// Wait for connections to terminate during shutdown and return if waited too long
 func waitTimeout(wg *sync.WaitGroup, d time.Duration) {
 	done := make(chan struct{})
 	go func() {

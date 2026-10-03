@@ -11,7 +11,7 @@ import (
 	"github.com/stevenlagoy/ramserver-core/server/internal/server"
 )
 
-const defaultAddr = "127.0.0.1:8080"
+const defaultAddr = "127.0.0.1:9000"
 
 func main() {
 	addr := os.Getenv("RAMSERVER_ADDR")
