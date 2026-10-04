@@ -24,10 +24,30 @@ Every frame is a four-byte length prefix followed by the payload:
   byte order.
 - The prefix value is the number of payload bytes that follow. It does not
   include the four-byte prefix.
-- Payloads are variable-sized, from zero through **65,536 bytes (64 KiB)**.
-  The maximum frame occupies 65,540 bytes on the wire.
+- Payloads are variable-sized, from zero through the **maximum payload size**
+  (see [Maximum payload size](#maximum-payload-size)). The default maximum is
+  65,536 bytes (64 KiB), so a maximum-size frame occupies 65,540 bytes on the
+  wire.
 - Each frame carries one payload. Do not combine separate messages into one
   frame or split one message across multiple frames.
+
+## Maximum payload size
+
+The maximum payload size is set by the `RAMSERVER_MAX_FRAME_BYTES`
+environment variable, in bytes. It limits the payload only; the four-byte
+prefix is not counted.
+
+| Variable                    | Default           | Allowed values                     |
+| --------------------------- | ----------------- | ---------------------------------- |
+| `RAMSERVER_MAX_FRAME_BYTES` | `65536` (64 KiB)  | Integer from `1` to `4294967295`   |
+
+- If the variable is unset or empty, the default is used.
+- If it is set to a value that is not an integer in the allowed range, the
+  server must refuse to start rather than fall back to the default.
+- The value must be the same on both ends of a connection. A client must not
+  send payloads larger than the server's maximum, and should be configured
+  with the same value so it accepts every frame the server may send. See
+  [`.env.example`](../.env.example).
 
 ## Reading frames
 
@@ -41,8 +61,8 @@ For each frame, a reader should:
 1. Read exactly four bytes for the prefix. If the stream ends before the
    prefix is complete, report a truncated frame/connection error.
 2. Decode those bytes as an unsigned big-endian 32-bit integer.
-3. Reject lengths greater than 65,536 **before allocating or reading the
-   payload**. Do not attempt to recover by treating payload bytes as another
+3. Reject lengths greater than the maximum payload size **before allocating
+   or reading the payload**. Do not attempt to recover by treating payload bytes as another
    prefix; close or otherwise fail the connection because the stream cannot
    safely continue under this framing contract.
 4. Read exactly the declared number of payload bytes. If the stream ends
@@ -60,7 +80,7 @@ count is satisfied, an error occurs, or the connection closes.
 
 To write a frame:
 
-1. Check that the payload is no larger than 65,536 bytes.
+1. Check that the payload is no larger than the maximum payload size.
 2. Encode the payload length as a four-byte unsigned big-endian integer.
 3. Write the complete prefix followed immediately by the payload.
 4. Ensure every byte is written. If the write API can return a short write,
