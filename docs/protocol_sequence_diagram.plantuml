@@ -1,0 +1,40 @@
+@startuml protocol_sequence_diagram
+participant "Client A" as A
+participant "Client B" as B
+participant "Server" as S
+
+A -> S: ConnectRequest
+S --> A: ConnectResponse
+A -> S: AuthRequest
+S --> A: AuthResponse (player_id, reconnect_token)
+
+B -> S: ConnectRequest
+S --> B: ConnectResponse
+B -> S: AuthRequest
+S --> B: AuthResponse (player_id, reconnect_token)
+
+A -> S: JoinLobbyRequest (creates lobby, becomes host)
+S --> A: LobbyUpdate (status: WAITING)
+B -> S: JoinLobbyRequest (same game_id)
+S --> A: LobbyUpdate (status: READY)
+S --> B: LobbyUpdate (status: READY)
+
+A -> S: StartGameRequest (host only)
+S --> A: LobbyUpdate (status: STARTING, match_id)
+S --> B: LobbyUpdate (status: STARTING, match_id)
+S --> A: StateUpdate (initial state)
+S --> B: StateUpdate (initial state)
+
+loop until match ends
+    A -> S: ActionRequest (encoded_action)
+    alt legal move
+        S --> A: StateUpdate (updated state)
+        S --> B: StateUpdate (updated state)
+    else illegal move
+        S --> A: ErrorResponse (ERROR_CODE_ILLEGAL_ACTION)
+    end
+end
+
+S --> A: MatchResult
+S --> B: MatchResult
+@enduml
