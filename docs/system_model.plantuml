@@ -1,0 +1,96 @@
+@startuml system_model
+package "internal/game" {
+    interface Game {
+        +Roles() []RoleSpec
+        +NewState(order []string, roles map[string]Role) GameState
+        +LegalActions(state, memberID) []ActionSpec
+        +Validate(state, action) error
+        +Apply(state, action) GameState
+        +ActiveTurn(state) []string
+        +Outcome(state) (Result, bool)
+        +ReadyToStart(roster, ready) bool
+        +ViewFor(state, memberID) any
+    }
+    class RoleSpec {
+        +Name Role
+        +Min int
+        +Max int
+    }
+    class Action {
+        +ID uint64
+        +ActorID string
+        +Payload []byte
+    }
+    class Result {
+        +WinnerIDs []string
+        +Draw bool
+    }
+    class Registry {
+        +Register(name, factory)
+        +New(name) (Game, error)
+        +Names() []string
+    }
+    class StubGame
+    StubGame ..|> Game
+    Registry --> "*" Game : constructs
+}
+package "internal/match" {
+    class Match {
+        +Game game.Game
+        +RosterOrder []string
+        +Roles map[string]game.Role
+        +State game.GameState
+        +Turns int
+        +ApplyAction(action) error
+        +Outcome() (game.Result, bool)
+        +ViewFor(memberID) any
+    }
+}
+package "internal/session" {
+    class Member {
+        +ClientID string
+        +Sender Sender
+        +Role game.Role
+        +Ready bool
+    }
+    class MatchResult {
+        +Turns int
+        +Result game.Result
+    }
+    class Session {
+        +ID string
+        +GameName string
+        +Public bool
+        +Owner() string
+        +Run(ctx)
+        +Join(ctx, clientID, Sender) error
+        +Leave(ctx, clientID)
+        +SetReady(ctx, clientID, bool)
+        +Submit(ctx, game.Action)
+        +LegalMoves(ctx, clientID) []game.ActionSpec
+    }
+    class SessionStore {
+        +Create(...) (*Session, error)
+        +Get(id) (*Session, bool)
+        +List(gameName, publicOnly) []*Session
+        +Remove(id)
+    }
+    Session --> "1" match.Match : current
+    Session --> "*" Member : members
+    SessionStore --> "*" Session
+}
+package "internal/server" {
+    class Client {
+        +ID string
+        -session *session.Session
+        +Run(ctx)
+    }
+    class Server {
+        -games *game.Registry
+        -sessions *session.SessionStore
+    }
+    Client ..|> session.Sender
+    Server --> "1" game.Registry
+    Server --> "1" session.SessionStore
+}
+@enduml
