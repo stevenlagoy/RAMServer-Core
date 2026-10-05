@@ -1,0 +1,48 @@
+@startuml old_system_model
+package "internal/game" {
+    interface Sender {
+        +Send(message []byte)
+    }
+    interface Game {
+        +Validate(Action) error
+        +Apply(Action)
+        +StateFor(memberID string) any
+    }
+    class Action {
+        +ID uint64
+        +From Sender
+        +Payload []byte
+    }
+    class StubGame {
+        -applied int
+    }
+    StubGame ..|> Game
+}
+package "internal/match" {
+    class Member {
+        +ID string
+        +Sender game.Sender
+        +Send(message []byte)
+    }
+    class Match {
+        -game game.Game
+        -inbox chan game.Action
+        -joined map[string]Member
+        +Run(ctx)
+        +Register(ctx, Member) bool
+        +Unregister(ctx, Member)
+    }
+    Match --> "1" Game
+    Match --> "*" Member : joined
+}
+package "internal/server" {
+    class Client {
+        +id string
+        +match *Match
+        -authenticated bool
+        +Run(ctx)
+    }
+    Client ..|> Sender
+    Client --> "1" Match
+}
+@enduml
