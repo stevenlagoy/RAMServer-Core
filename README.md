@@ -56,7 +56,7 @@ If `buf` is not found afterward, add Go's bin directory to your Path:
 
 ### 1. Clone and enter the repository
 
-**Linux / maxOS (bash)**
+**Linux / macOS (bash)**
 ```bash
 git clone https://github.com/stevenlagoy/ramserver-core.git
 cd ramserver-core
@@ -78,20 +78,20 @@ Identical on all platforms:
 docker compose up --build
 ```
 
-The server listens on `localhost:8080`. Stop it with `Ctrl+C` and remove the container with `docker compose down`.
+The server listens on `localhost:9000`. Stop it with `Ctrl+C` and remove the container with `docker compose down`.
 
 ### 4. Run the server without Docker (faster iteration)
 
-**Linux / maxOS (bash)**
+**Linux / macOS (bash)**
 ```bash
 cd server
-go run ./cmd/ramserver
+go run ./cmd/ramserver --addr :9000
 ```
 
 **Windows (cmd)**
 ```cmd
 cd server
-go run .\cmd\ramserver
+go run .\cmd\ramserver --addr :9000
 ```
 
 ### 5. Run the tests
