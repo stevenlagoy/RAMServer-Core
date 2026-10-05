@@ -15,8 +15,8 @@ message ClientMessage {
   oneof payload {
     ConnectRequest connect_request = 2;
     AuthRequest auth_request = 3;
-    JoinGameRequest join_game_request = 4;
-    LeaveGameRequest leave_game_request = 5;
+    JoinSessionRequest join_session_request = 4;
+    LeaveSessionRequest leave_session_request = 5;
     ActionRequest action_request = 6;
   }
 }
@@ -30,7 +30,7 @@ message ServerMessage {
     StateUpdate state_update = 4;
     ErrorResponse error_response = 5;
     MatchResult match_result = 6;
-    LeaveGameResponse leave_game_response = 7;
+    LeaveSessionResponse leave_session_response = 7;
   }
 }
 
@@ -63,17 +63,17 @@ message AuthResponse {
 
 // --- Session membership ---
 
-message JoinGameRequest {
+message JoinSessionRequest {
   string game_id = 1;
   string session_id = 2;
 }
 
-message LeaveGameRequest {
+message LeaveSessionRequest {
   string session_id = 1;
 }
 
 // Sent to the leaving player, who no longer receives session broadcasts.
-message LeaveGameResponse {
+message LeaveSessionResponse {
   string session_id = 1;
 }
 

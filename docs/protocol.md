@@ -6,14 +6,14 @@ This document explains every message, field, and enum in the schema, and the ord
 
 ## Schema overview
 
-| Section in the proto        | Messages / enums                                                   |
-| --------------------------- | ------------------------------------------------------------------ |
-| Envelopes                   | `ClientMessage`, `ServerMessage`                                   |
-| Connection & authentication | `ConnectRequest`, `ConnectResponse`, `AuthRequest`, `AuthResponse` |
-| Session membership          | `JoinGameRequest`, `LeaveGameRequest`, `LeaveGameResponse`         |
-| Session actions & state     | `ActionRequest`, `StateUpdate`, `SessionPlayer`, `SessionStatus`   |
-| Errors                      | `ErrorResponse`, `ErrorCode`                                       |
-| Match completion            | `MatchResult`, `MatchEndReason`, `PlayerActionSummary`             |
+| Section in the proto        | Messages / enums                                                       |
+| --------------------------- | ---------------------------------------------------------------------- |
+| Envelopes                   | `ClientMessage`, `ServerMessage`                                       |
+| Connection & authentication | `ConnectRequest`, `ConnectResponse`, `AuthRequest`, `AuthResponse`       |
+| Session membership          | `JoinSessionRequest`, `LeaveSessionRequest`, `LeaveSessionResponse`     |
+| Session actions & state     | `ActionRequest`, `StateUpdate`, `SessionPlayer`, `SessionStatus`       |
+| Errors                      | `ErrorResponse`, `ErrorCode`                                           |
+| Match completion            | `MatchResult`, `MatchEndReason`, `PlayerActionSummary`                 |
 
 **Generated code.** Generated code is not committed; run `buf generate` after any change under `proto/` (see the [README](../README.md)). The file options control the generated packages:
 
@@ -30,12 +30,12 @@ Each frame payload (see [framing.md](framing.md)) is one serialized envelope: `C
 
 | #   | Field                | Type               |
 | --- | -------------------- | ------------------ |
-| 1   | `sequence`           | `uint64`           |
-| 2   | `connect_request`    | `ConnectRequest`   |
-| 3   | `auth_request`       | `AuthRequest`      |
-| 4   | `join_game_request`  | `JoinGameRequest`  |
-| 5   | `leave_game_request` | `LeaveGameRequest` |
-| 6   | `action_request`     | `ActionRequest`    |
+| 1   | `sequence`             | `uint64`             |
+| 2   | `connect_request`      | `ConnectRequest`     |
+| 3   | `auth_request`         | `AuthRequest`        |
+| 4   | `join_session_request` | `JoinSessionRequest` |
+| 5   | `leave_session_request`| `LeaveSessionRequest`|
+| 6   | `action_request`       | `ActionRequest`      |
 
 - `sequence` - a client-assigned, monotonically increasing counter used to correlate a response with the request that caused it.
 
@@ -43,13 +43,13 @@ Each frame payload (see [framing.md](framing.md)) is one serialized envelope: `C
 
 | #   | Field                 | Type                |
 | --- | --------------------- | ------------------- |
-| 1   | `in_reply_to`         | `uint64`            |
-| 2   | `connect_response`    | `ConnectResponse`   |
-| 3   | `auth_response`       | `AuthResponse`      |
-| 4   | `state_update`        | `StateUpdate`       |
-| 5   | `error_response`      | `ErrorResponse`     |
-| 6   | `match_result`        | `MatchResult`       |
-| 7   | `leave_game_response` | `LeaveGameResponse` |
+| 1   | `in_reply_to`           | `uint64`              |
+| 2   | `connect_response`      | `ConnectResponse`     |
+| 3   | `auth_response`         | `AuthResponse`        |
+| 4   | `state_update`          | `StateUpdate`         |
+| 5   | `error_response`        | `ErrorResponse`       |
+| 6   | `match_result`          | `MatchResult`         |
+| 7   | `leave_session_response` | `LeaveSessionResponse` |
 
 - `in_reply_to` - echoes the `sequence` of the client message this is a direct response to. For unsolicited server pushes, such as broadcasts to everyone in a session, this is `0`. Clients should therefore start `sequence` at `1`.
 
@@ -57,11 +57,11 @@ Each frame payload (see [framing.md](framing.md)) is one serialized envelope: `C
 
 | Request            | Success reply                                                                  |
 | ------------------ | ------------------------------------------------------------------------------ |
-| `ConnectRequest`   | `ConnectResponse`                                                              |
-| `AuthRequest`      | `AuthResponse`                                                                 |
-| `JoinGameRequest`  | The requester's copy of the `StateUpdate` broadcast that includes them         |
-| `LeaveGameRequest` | `LeaveGameResponse`                                                            |
-| `ActionRequest`    | The requester's copy of the `StateUpdate` broadcast produced by the action     |
+| `ConnectRequest`      | `ConnectResponse`                                                              |
+| `AuthRequest`         | `AuthResponse`                                                                 |
+| `JoinSessionRequest`  | The requester's copy of the `StateUpdate` broadcast that includes them         |
+| `LeaveSessionRequest` | `LeaveSessionResponse`                                                         |
+| `ActionRequest`       | The requester's copy of the `StateUpdate` broadcast produced by the action     |
 
 Other players' copies of the same broadcast carry `in_reply_to = 0`. A client can therefore treat any reply with a matching `in_reply_to` as the outcome of its request.
 
@@ -128,10 +128,10 @@ A **session** is one instance of a game, from the moment it is created until it 
 
 | Message             | Direction                                                 | Sent when                                                                        |
 | ------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `JoinGameRequest`   | client → server                                           | A player requests to join a session for a game.                                  |
-| `LeaveGameRequest`  | client → server                                           | A player requests to leave a session.                                            |
-| `LeaveGameResponse` | server → client                                           | In reply to a successful `LeaveGameRequest`.                                     |
-| `ActionRequest`     | client → server                                           | A player submits a game-defined action, in any phase: a start vote, a move, etc. |
+| `JoinSessionRequest`   | client → server                                           | A player requests to join a session for a game.                                  |
+| `LeaveSessionRequest`  | client → server                                           | A player requests to leave a session.                                            |
+| `LeaveSessionResponse` | server → client                                           | In reply to a successful `LeaveSessionRequest`.                                  |
+| `ActionRequest`        | client → server                                           | A player submits a game-defined action, in any phase: a start vote, a move, etc. |
 | `StateUpdate`       | server → client (broadcast to all players in the session) | Whenever membership, connection status, session status, or game state changes.   |
 | `ErrorResponse`     | server → client                                           | A request is rejected, or any other protocol-level error occurs.                 |
 | `MatchResult`       | server → client (broadcast to all players in the session) | The match ends, normally or otherwise.                                           |
@@ -141,7 +141,7 @@ The core and the game split responsibility:
 - **The core owns membership.** Joining and leaving are core messages because they bind a connection, and so a `player_id`, to a session. The core uses that binding to keep the roster, to know whom to broadcast to, and to attribute every action to the connection that sent it. A client cannot send an `ActionRequest` before joining because it has no `session_id` to send it to.
 - **The game owns everything inside the session.** Every `ActionRequest` goes to the registered game implementation, whatever the session's phase. The game decides its admission rules, whether the session has an owner, which actions are valid in each phase, and when the session moves from waiting to in progress. The game may start through an owner action, a vote, a timer, reaching a player threshold, or another rule; a timer- or condition-driven start needs no client action. The protocol does not assume that the first player to join owns the session or that one player must manually start it.
 
-**`JoinGameRequest`**
+**`JoinSessionRequest`**
 
 - `game_id` - the game to play: `"tictactoe"`, `"chess"`, or `"gofish"`. An unregistered value is rejected with `ERROR_CODE_UNKNOWN_GAME`.
 - `session_id` - when non-empty, requests a specific session (`ERROR_CODE_SESSION_NOT_FOUND` if it does not exist). When empty, asks the server to select or create a session according to the game's policy.
@@ -149,13 +149,13 @@ The core and the game split responsibility:
 - If the session cannot accept the player, for example because it has already started, has closed, or is full, the join is rejected with `ERROR_CODE_SESSION_NOT_JOINABLE`.
 - On success, the server broadcasts a `StateUpdate` to the session, including the new player. The requester's copy is its reply, and it carries the server-assigned `session_id`.
 
-**`LeaveGameRequest`**
+**`LeaveSessionRequest`**
 
 - `session_id` - the session to leave. Sent for a session the player is not a member of, it is rejected with `ERROR_CODE_NOT_IN_SESSION`.
 - Leaving is always permitted. Leaving an in-progress match is a forfeit: the game decides whether the match continues without the player or ends with a `MatchResult` whose `reason` is `MATCH_END_REASON_FORFEIT`.
-- On success, the leaver receives `LeaveGameResponse` and no further broadcasts from the session; the remaining players receive a `StateUpdate` without the leaver.
+- On success, the leaver receives `LeaveSessionResponse` and no further broadcasts from the session; the remaining players receive a `StateUpdate` without the leaver.
 
-**`LeaveGameResponse`**
+**`LeaveSessionResponse`**
 
 - `session_id` - the session the player left.
 
