@@ -1,95 +1,69 @@
 package match
 
 import (
-	"context"
 	"errors"
-	"log"
-	"runtime/debug"
 
 	"github.com/stevenlagoy/ramserver-core/server/internal/game"
-	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
 
+// Holds the live state of one round of play, including Game rules, roster and
+// role assignments, current GameState, and how many actions have been applied.
+// Owned by a Session which also manages channels and serialization
 type Match struct {
-	game   game.Game
-	inbox  chan game.Action
-	join   chan Member
-	leave  chan Member
-	joined map[string]Member
+	Game        game.Game
+	RosterOrder []string
+	Roles       map[string]game.Role
+	State       game.GameState
+	Turns       int
 }
 
-type Member struct {
-	ID     string
-	Sender game.Sender
-}
-
-func (m Member) Send(message []byte) {
-	m.Sender.Send(message)
-}
-
-func NewMatch(g game.Game) *Match {
+// Builds a Match and asks g for the starting GameState
+func NewMatch(g game.Game, rosterOrder []string, roles map[string]game.Role) *Match {
 	return &Match{
-		game:   g,
-		inbox:  make(chan game.Action, 64),
-		join:   make(chan Member),
-		leave:  make(chan Member),
-		joined: make(map[string]Member),
+		Game:        g,
+		RosterOrder: rosterOrder,
+		Roles:       roles,
+		State:       g.NewState(rosterOrder, roles),
 	}
 }
 
-func (m *Match) Inbox() chan<- game.Action { return m.inbox }
+// Returned by ApplyAction when the action's ActorID is not currently active
+var ErrNotYourTurn = errors.New("not your turn")
 
-func (m *Match) Register(ctx context.Context, member Member) bool {
-	select {
-	case m.join <- member:
-		return true
-	case <-ctx.Done():
-		return false
+// Checks turn legality and asks Game to validate and apply action. Updates
+// m.State and m.Turns when successful. Returns an error to the caller on failure.
+func (m *Match) ApplyAction(action game.Action) error {
+	if !isActive(m.Game.ActiveTurn(m.State), action.ActorID) {
+		return ErrNotYourTurn
 	}
+	if err := m.Game.Validate(m.State, action); err != nil {
+		return err
+	}
+	m.State = m.Game.Apply(m.State, action)
+	m.Turns++
+	return nil
 }
 
-func (m *Match) Unregister(ctx context.Context, member Member) {
-	select {
-	case m.leave <- member:
-	case <-ctx.Done():
-	}
-}
-
-func (m *Match) Run(ctx context.Context) {
-	for {
-		select {
-		case member := <-m.join:
-			m.joined[member.ID] = member
-		case member := <-m.leave:
-			if m.joined[member.ID] == member { // Ignore stale leave from replaced connection
-				delete(m.joined, member.ID)
-			}
-		case action := <-m.inbox:
-			m.handle(action)
-		case <-ctx.Done():
-			return
+func isActive(activeIDs []string, id string) bool {
+	for _, a := range activeIDs {
+		if a == id {
+			return true
 		}
 	}
+	return false
 }
 
-func (m *Match) handle(action game.Action) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("game panic on action: %d: %v\n%s", action.ID, r, debug.Stack())
-			action.From.Send(transport.EncodeReject(action.ID, errors.New("internal error")))
-		}
-	}()
-	if err := m.game.Validate(action); err != nil {
-		action.From.Send(transport.EncodeReject(action.ID, err))
-		return
-	}
-	m.game.Apply(action)
-	m.broadcast()
+// Reports whether the match has ended
+func (m *Match) Outcome() (game.Result, bool) {
+	return m.Game.Outcome(m.State)
 }
 
-// Broadcast sends every joined member their own view of the current state. Each member gets a freshly-encoded payload, since StateFor may withhold different information for different members.
-func (m *Match) broadcast() {
-	for id, member := range m.joined {
-		member.Send(transport.EncodeState(m.game.StateFor(id)))
-	}
+// Returns memberID's view of the current state
+func (m *Match) ViewFor(memberID string) any {
+	return m.Game.ViewFor(m.State, memberID)
+}
+
+// Returns the actions memberID may currently take
+func (m *Match) LegalActions(memberID string) []game.ActionSpec {
+	return m.Game.LegalActions(m.State, memberID)
 }

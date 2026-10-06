@@ -1,0 +1,61 @@
+@startuml use_case_model
+left to right direction
+skinparam packageStyle rectangle
+skinparam usecase {
+  BackgroundColor White
+  BorderColor Black
+}
+
+actor "Player" as Player
+actor "Match Reviewer" as Reviewer
+actor "External Developer" as Dev
+actor "Server Operator" as Operator
+actor "QA Engineer" as QA
+actor "CI System" as CI
+
+rectangle "RAMServer-Core" {
+  usecase "UC-1: Connect and\nauthenticate" as UC1
+  usecase "UC-2: Create or join\na session" as UC2
+  usecase "UC-3: Submit an action" as UC3
+  usecase "UC-4: Handle a\nrejected action" as UC4
+  usecase "UC-5: Handle a\ndead connection" as UC5
+  usecase "UC-6: Complete a match\nand persist it" as UC6
+  usecase "UC-7: Review or replay\na completed match" as UC7
+  usecase "UC-8: Add a new game" as UC8
+  usecase "UC-9: Start a rematch" as UC9
+  usecase "UC-10: Leave a session" as UC10
+  usecase "UC-11: Reconnect to a match\n(stretch goal)" as UC11
+  usecase "UC-12: Handle hostile or\nmalformed input" as UC12
+  usecase "UC-13: Verify client\nconformance" as UC13
+  usecase "UC-14: Configure, run, and\nstop the server" as UC14
+}
+
+Player --> UC1
+Player --> UC2
+Player --> UC3
+Player --> UC9
+Player --> UC10
+Player --> UC11
+Player --> UC4
+
+Reviewer --> UC7
+Dev --> UC8
+Operator --> UC14
+QA --> UC12
+QA --> UC13
+CI --> UC13
+
+UC2 ..> UC1 : <<include>>
+UC3 ..> UC1 : <<include>>
+UC9 ..> UC1 : <<include>>
+UC11 ..> UC1 : <<include>>
+
+UC4 ..> UC3 : <<extend>>\n[action rejected]
+UC6 ..> UC3 : <<extend>>\n[terminal state]
+UC5 ..> UC3 : <<extend>>\n[connection lost]
+UC11 ..> UC5 : <<extend>>\n[pause policy]
+UC9 ..> UC6 : <<extend>>\n[players want another match]
+UC7 ..> UC6 : <<include>>\n[record must exist]
+
+UC12 ..> UC3 : <<extend>>\n[invalid input]
+@enduml

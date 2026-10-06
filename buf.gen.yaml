@@ -4,6 +4,6 @@ plugins:
     out: server/gen
     opt: paths=source_relative
   - remote: buf.build/protocolbuffers/java
-    out: clients/client-1/gen
+    out: games/chess/compiled_client/gen
   - remote: buf.build/protocolbuffers/python
-    out: clients/client-2/gen
+    out: games/chess/interpreted_client/gen
