@@ -67,7 +67,7 @@ func startTestServer(t *testing.T, cfg ServerConfig) (string, func()) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		Serve(ctx, ln, cfg)
+		Serve(ctx, ln, cfg, func() game.Game { return &testgame.StubGame{} })
 	}()
 	stop := func() {
 		cancel()

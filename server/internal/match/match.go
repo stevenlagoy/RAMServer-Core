@@ -3,7 +3,7 @@ package match
 import (
 	"errors"
 
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
+	"github.com/stevenlagoy/ramserver-core/server/game"
 )
 
 // Holds the live state of one round of play, including Game rules, roster and

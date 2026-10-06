@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/session"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
@@ -104,7 +104,7 @@ func (c *Client) readLoop(ctx context.Context) {
 			switch {
 			case errors.Is(err, io.EOF), errors.Is(err, net.ErrClosed):
 				// Normal disconnect or shutdown: no log
-			case errors.Is(err, syscall.ECONNRESET):
+			case errors.Is(err, syscall.ECONNRESET), errors.Is(err, syscall.Errno(10054)):
 				// Client disconnected abruptly (happens in test teardowns): no log
 			case errors.Is(err, os.ErrDeadlineExceeded):
 				log.Printf("%s: read timeout", c.ID)

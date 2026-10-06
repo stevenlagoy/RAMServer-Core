@@ -1,4 +1,6 @@
-package game
+package testgame
+
+import "github.com/stevenlagoy/ramserver-core/server/game"
 
 // Placeholder game to exercise the server
 type StubGame struct {
@@ -13,14 +15,14 @@ type stubState struct {
 	endAfter int
 }
 
-func (g *StubGame) Roles() []RoleSpec {
-	return []RoleSpec{{Name: RolePlayer, Min: 1, Max: 0}}
+func (g *StubGame) Roles() []game.RoleSpec {
+	return []game.RoleSpec{{Name: game.RolePlayer, Min: 1, Max: 0}}
 }
 
-func (g *StubGame) NewState(rosterOrder []string, roles map[string]Role) GameState {
+func (g *StubGame) NewState(rosterOrder []string, roles map[string]game.Role) game.GameState {
 	var order []string
 	for _, id := range rosterOrder {
-		if roles[id] == RolePlayer {
+		if roles[id] == game.RolePlayer {
 			order = append(order, id)
 		}
 	}
@@ -31,20 +33,20 @@ func (g *StubGame) NewState(rosterOrder []string, roles map[string]Role) GameSta
 	return stubState{order: order, endAfter: endAfter}
 }
 
-func (g *StubGame) LegalActions(state GameState, memberID string) []ActionSpec {
+func (g *StubGame) LegalActions(state game.GameState, memberID string) []game.ActionSpec {
 	for _, id := range g.ActiveTurn(state) {
 		if id == memberID {
-			return []ActionSpec{{Payload: []byte("NoOp"), Description: "advance the counter"}}
+			return []game.ActionSpec{{Payload: []byte("NoOp"), Description: "advance the counter"}}
 		}
 	}
 	return nil
 }
 
-func (g *StubGame) Validate(state GameState, action Action) error {
+func (g *StubGame) Validate(state game.GameState, action game.Action) error {
 	return nil // Accept anything
 }
 
-func (g *StubGame) Apply(state GameState, action Action) GameState {
+func (g *StubGame) Apply(state game.GameState, action game.Action) game.GameState {
 	s := state.(stubState)
 	s.applied++
 	if len(s.order) > 0 {
@@ -53,7 +55,7 @@ func (g *StubGame) Apply(state GameState, action Action) GameState {
 	return s
 }
 
-func (g *StubGame) ActiveTurn(state GameState) []string {
+func (g *StubGame) ActiveTurn(state game.GameState) []string {
 	s := state.(stubState)
 	if len(s.order) == 0 {
 		return nil
@@ -61,15 +63,15 @@ func (g *StubGame) ActiveTurn(state GameState) []string {
 	return []string{s.order[s.turn%len(s.order)]} // This is kinda gross sorry but the linter wants it this way
 }
 
-func (g *StubGame) Outcome(state GameState) (Result, bool) {
+func (g *StubGame) Outcome(state game.GameState) (game.Result, bool) {
 	s := state.(stubState)
 	if s.applied >= s.endAfter {
-		return Result{Draw: true}, true
+		return game.Result{Draw: true}, true
 	}
-	return Result{}, false
+	return game.Result{}, false
 }
 
-func (g *StubGame) ReadyToStart(roster map[string]Role, ready map[string]bool) bool {
+func (g *StubGame) ReadyToStart(roster map[string]game.Role, ready map[string]bool) bool {
 	for id := range roster {
 		if !ready[id] {
 			return false
@@ -78,6 +80,6 @@ func (g *StubGame) ReadyToStart(roster map[string]Role, ready map[string]bool) b
 	return len(roster) > 0
 }
 
-func (g *StubGame) ViewFor(state GameState, memberID string) any {
+func (g *StubGame) ViewFor(state game.GameState, memberID string) any {
 	return state.(stubState).applied
 }

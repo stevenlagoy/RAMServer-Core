@@ -8,7 +8,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/server"
+	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
 )
 
 const defaultAddr = "127.0.0.1:9000"
@@ -29,7 +31,9 @@ func main() {
 	// Context for coordinating shutdown; cancelled on SIGINT/SIGTERM
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if err := server.Serve(ctx, listener, server.DefaultConfig()); err != nil {
+	games := game.NewRegistry()
+	games.Register("stub", func() game.Game { return &testgame.StubGame{} })
+	if err := server.Serve(ctx, listener, server.DefaultConfig(), games); err != nil {
 		log.Fatal(err)
 	}
 }

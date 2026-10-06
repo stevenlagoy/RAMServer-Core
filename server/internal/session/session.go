@@ -6,7 +6,7 @@ import (
 	"log"
 	"runtime/debug"
 
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/match"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )

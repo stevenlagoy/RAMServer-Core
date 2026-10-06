@@ -3,7 +3,7 @@ package transport
 import (
 	"fmt"
 
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
+	"github.com/stevenlagoy/ramserver-core/server/game"
 )
 
 // TODO: These are placeholders and need to be completed based on the protocol

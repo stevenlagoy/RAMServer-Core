@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/session"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
@@ -77,15 +77,13 @@ func (l *ipLimiter) allow(addr net.Addr, max int32) (release func(), ok bool) {
 }
 
 // Start the server and accept incoming connections to the given listener
-func Serve(ctx context.Context, listener net.Listener, config ServerConfig) error {
+func Serve(ctx context.Context, listener net.Listener, config ServerConfig, games *game.Registry) error {
 	ipCounts := newIPLimiter()
 
 	// Semaphore to limit connections
 	sem := make(chan struct{}, config.MaxConnections)
 	var wg sync.WaitGroup
 
-	games := game.NewRegistry()
-	games.Register("stub", func() game.Game { return &game.StubGame{} })
 	sessions := session.NewSessionStore()
 
 	go func() {
