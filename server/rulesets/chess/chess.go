@@ -54,7 +54,7 @@ func (g *Game) ReadyToStart(roster map[string]game.Role, ready map[string]bool) 
 		if !ready[id] {
 			return false
 		}
-		players ++
+		players++
 	}
 	return players == 2
 }

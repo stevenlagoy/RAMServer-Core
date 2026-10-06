@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stevenlagoy/ramserver-core/server/game"
+	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
 
@@ -67,7 +69,9 @@ func startTestServer(t *testing.T, cfg ServerConfig) (string, func()) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		Serve(ctx, ln, cfg, func() game.Game { return &testgame.StubGame{} })
+		games := game.NewRegistry()
+		games.Register("stub", func() game.Game { return &testgame.StubGame{} })
+		Serve(ctx, ln, cfg, games)
 	}()
 	stop := func() {
 		cancel()

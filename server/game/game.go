@@ -18,6 +18,7 @@ type GameState any
 // passed into the Game's methods. One Game built and registered with a name
 // serves every concurrent Match of that game.
 type Game interface {
+
 	// Lists every role this game defines, and how many of each a session may hold
 	Roles() []RoleSpec
 
