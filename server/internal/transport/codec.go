@@ -12,16 +12,10 @@ import (
 	"github.com/stevenlagoy/ramserver-core/server/internal/game"
 )
 
-// Codec between frame payloads and the wire protocol in docs/protocol.md.
-// Every non-empty inbound payload is one serialized pb.ClientMessage and every
-// outbound payload is one serialized pb.ServerMessage. Generated types stay
-// inside this file so the rest of the server does not depend on them.
-
 // Schema version this server implements, as "<major>.<minor>"
 const ProtocolVersion = "1.0"
 
-// Reports whether a client built against clientVersion may connect: the major
-// versions must match, regardless of minor version
+// Reports whether a client built against clientVersion may connect
 func CompatibleVersion(clientVersion string) bool {
 	major, _, ok := strings.Cut(clientVersion, ".")
 	if !ok || major == "" {
@@ -55,9 +49,9 @@ const (
 // Protocol-level failure, reported to the client as an ErrorResponse
 type Error struct {
 	Code      ErrorCode
-	Message   string // Human-readable detail; clients branch on Code
-	SessionID string // Set when the error is scoped to a session
-	Err       error  // Optional cause, for errors.Is/As
+	Message   string
+	SessionID string
+	Err       error
 }
 
 func NewError(code ErrorCode, format string, args ...any) *Error {
@@ -109,7 +103,7 @@ func (k ClientMessageKind) String() string {
 // Decoded ClientMessage envelope. Only Sequence and the fields for Kind are set.
 type ClientMessage struct {
 	Kind     ClientMessageKind
-	Sequence uint64 // Echoed as in_reply_to on the direct reply
+	Sequence uint64
 
 	// KindConnect
 	ProtocolVersion string
@@ -117,22 +111,19 @@ type ClientMessage struct {
 
 	// KindAuth
 	DisplayName    string
-	PlayerID       string // Empty to register a new player
-	ReconnectToken string // Empty to register a new player
+	PlayerID       string
+	ReconnectToken string
 
 	// KindJoinSession (GameID, SessionID), KindLeaveSession and KindAction (SessionID)
 	GameID    string
-	SessionID string // Empty on KindJoinSession asks the game to select or create one
+	SessionID string
 
 	// KindAction. Action.ID is Sequence; ActorID is left for the caller to set
-	// from the connection's authenticated identity, never from the frame
 	Action               game.Action
-	ExpectedStateVersion uint64 // Zero means no stale-state check
+	ExpectedStateVersion uint64
 }
 
-// Parse one frame payload as a ClientMessage envelope. Errors are *Error with
-// CodeMalformedMessage. If the envelope parsed but carried no known payload,
-// the returned message still holds its Sequence for the reply's in_reply_to.
+// Parse one frame payload as a ClientMessage envelope
 func DecodeClientMessage(frame []byte) (ClientMessage, error) {
 	var env pb.ClientMessage
 	if err := proto.Unmarshal(frame, &env); err != nil {
@@ -195,7 +186,7 @@ type StateUpdate struct {
 	Status         SessionStatus
 	Players        []SessionPlayer
 	StateVersion   uint64
-	EncodedView    []byte // Game-encoded, per-recipient view
+	EncodedView    []byte
 	ActivePlayerID string
 	PlayerOrder    []string
 }
@@ -253,8 +244,7 @@ func EncodeLeaveSessionResponse(inReplyTo uint64, sessionID string) []byte {
 	})
 }
 
-// One recipient's copy of a session broadcast. inReplyTo is the request's
-// sequence for the requester's copy and 0 for everyone else.
+// One recipient's copy of a session broadcast
 func EncodeStateUpdate(inReplyTo uint64, s StateUpdate) []byte {
 	players := make([]*pb.SessionPlayer, len(s.Players))
 	for i, p := range s.Players {
@@ -296,8 +286,6 @@ func EncodeMatchResult(m MatchResult) []byte {
 	})
 }
 
-// ErrorResponse for err. An *Error anywhere in err's chain supplies the code
-// and session; any other error is reported as CodeInternal.
 func EncodeError(inReplyTo uint64, err error) []byte {
 	resp := &pb.ErrorResponse{Code: CodeInternal, Message: err.Error()}
 	var perr *Error
