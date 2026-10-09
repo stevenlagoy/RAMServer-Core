@@ -34,7 +34,8 @@ type Game interface {
 	// Reports whether action is legal given state. Must not mutate state.
 	Validate(state GameState, action Action) error
 
-	// Returns the GameState after action is applied. Must not mutate in-place (see GameState).
+	// Returns the GameState after action is applied. Must not mutate in-place
+	// (see GameState). Should not do its own validation.
 	Apply(state GameState, action Action) GameState
 
 	// Reports which member ID(s) may currently submit Actions. May return empty
@@ -43,7 +44,7 @@ type Game interface {
 
 	// Reports whether state is a finished match, and how it ended if so. Should
 	// return false as long as play is continuing.
-	Outcome(state GameState) (result Result, ok bool)
+	Outcome(state GameState) (result MatchResult, ok bool)
 
 	// Reports whether a lobby may begin a match, given its roster and each member's
 	// ready flag. May depend on number of players present, number ready to start,
@@ -62,12 +63,23 @@ type Action struct {
 	Payload []byte
 }
 
+type TerminationReason string
+
 // Reports how a completed Match ended
-type Result struct {
-	WinnerIDs []string
-	Scores    map[string]float32
-	Draw      bool
+type MatchResult interface {
+	GetWinnerIDs() []string
+	TerminationReason() TerminationReason
 }
+
+// Generic game result. Games with more specific results or outcomes can implement the MatchResult interface.
+type Result struct {
+	WinnerIDs []string           // ID of any player who won this match
+	Scores    map[string]float32 // scores of each player
+	Reason    TerminationReason  // reason for the match ending
+}
+
+func (r Result) GetWinnerIDs() []string               { return r.WinnerIDs }
+func (r Result) TerminationReason() TerminationReason { return r.Reason }
 
 // Describes one action a member may currently take. Payload is the same game-
 // defined encoding as a client submits to validate or submit an action.

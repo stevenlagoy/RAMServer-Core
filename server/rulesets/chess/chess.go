@@ -59,7 +59,7 @@ func (g *Game) ReadyToStart(roster map[string]game.Role, ready map[string]bool) 
 	return players == 2
 }
 
-func (g *Game) Outcome(s game.GameState) (game.Result, bool) {
+func (g *Game) Outcome(s game.GameState) (game.MatchResult, bool) {
 	return s.(State).outcome()
 }
 
