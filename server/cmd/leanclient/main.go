@@ -3,15 +3,25 @@ package main
 import (
 	"bufio"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"strings"
+	"time"
 )
 
-const defaultAddr = "127.0.0.1:9000"
+const (
+	defaultAddr = "127.0.0.1:9000"
+	maxFrame    = 64 << 10
+)
 
 func writeFrame(w io.Writer, payload []byte) error {
+	if len(payload) > maxFrame {
+		return fmt.Errorf("frame too large: %d bytes (max %d)", len(payload), maxFrame)
+	}
+
 	buf := make([]byte, 4+len(payload))
 	binary.BigEndian.PutUint32(buf, uint32(len(payload)))
 	copy(buf[4:], payload)
@@ -19,52 +29,174 @@ func writeFrame(w io.Writer, payload []byte) error {
 	return err
 }
 
-func writeHello(conn net.Conn) error {
-	return writeFrame(conn, []byte(`{"token": "hello", "content": "world"}`))
-}
-
 func readFrame(r io.Reader) ([]byte, error) {
 	var header [4]byte
 	if _, err := io.ReadFull(r, header[:]); err != nil {
 		return nil, err
 	}
-	payload := make([]byte, binary.BigEndian.Uint32(header[:]))
+
+	n := binary.BigEndian.Uint32(header[:])
+	if n > maxFrame {
+		return nil, fmt.Errorf("frame too large: %d bytes (max %d)", n, maxFrame)
+	}
+
+	payload := make([]byte, n)
 	if _, err := io.ReadFull(r, payload); err != nil {
 		return nil, err
 	}
 	return payload, nil
 }
 
+func frameKind(frame []byte) string {
+	text := string(frame)
+	switch {
+	case len(frame) == 0:
+		return "HEARTBEAT"
+	case strings.HasPrefix(text, "welcome "):
+		return "WELCOME"
+	case strings.HasPrefix(text, "reject "):
+		return "REJECT"
+	case strings.HasPrefix(text, "state "):
+		return "STATE"
+	default:
+		return "DATA"
+	}
+}
+
+func getTime() string {
+	return time.Now().Format("2006-01-02 15:04:05")
+}
+
+func logReceived(frame []byte) {
+	fmt.Printf("[%s] <- %-9s %s\n", getTime(), frameKind(frame), frame)
+}
+
+func sendFrame(conn net.Conn, kind string, payload []byte) error {
+	if err := writeFrame(conn, payload); err != nil {
+		return err
+	}
+	fmt.Printf("[%s] -> %-9s %s\n", getTime(), kind, payload)
+	return nil
+}
+
+// readApplicationFrame waits for the next non-heartbeat frame. Heartbeats are
+// answered immediately so the server's read deadline remains alive.
+func readApplicationFrame(conn net.Conn, reader *bufio.Reader) ([]byte, error) {
+	for {
+		frame, err := readFrame(reader)
+		if err != nil {
+			return nil, err
+		}
+		logReceived(frame)
+		if len(frame) == 0 {
+			if err := writeFrame(conn, nil); err != nil {
+				return nil, fmt.Errorf("reply to heartbeat: %w", err)
+			}
+			fmt.Printf("[%s] -> HEARTBEAT reply\n", getTime())
+			continue
+		}
+
+		return frame, nil
+	}
+}
+
+func receiveLoop(conn net.Conn, reader *bufio.Reader) error {
+	for {
+		if _, err := readApplicationFrame(conn, reader); err != nil {
+			return err
+		}
+	}
+}
+
 func main() {
-	addr := os.Getenv("RAMSERVER_ADDR")
-	if addr == "" {
-		addr = defaultAddr
+	addrDefault := os.Getenv("RAMSERVER_ADDR")
+	if addrDefault == "" {
+		addrDefault = defaultAddr
 	}
 
-	conn, err := net.Dial("tcp", addr)
+	addr := flag.String("addr", addrDefault, "server address")
+	hello := flag.String("hello", "leanclient", "handshake frame payload")
+	send := flag.String("send", "", "send one frame after the handshake, print one response, then exit")
+	flag.Parse()
+
+	conn, err := net.Dial("tcp", *addr)
 	if err != nil {
-		fmt.Println("Error connecting to server: ", err)
+		fmt.Println("Error connecting to server:", err)
 		return
 	}
 	defer conn.Close()
 
-	if err := writeHello(conn); err != nil {
-		fmt.Println("Error sending data to server: ", err)
+	fmt.Println("Connected to", *addr)
+	reader := bufio.NewReader(conn)
+
+	if err := sendFrame(conn, "HELLO", []byte(*hello)); err != nil {
+		fmt.Println("Error sending handshake:", err)
 		return
 	}
 
-	reader := bufio.NewReader(conn)
-	for {
-		frame, err := readFrame(reader)
-		if err != nil {
-			fmt.Println("Connection closed: ", err)
+	// Wait for the server's handshake response before accepting action frames.
+	response, err := readApplicationFrame(conn, reader)
+	if err != nil {
+		fmt.Println("Connection closed during handshake:", err)
+		return
+	}
+	if frameKind(response) == "REJECT" {
+		return
+	}
+
+	if *send != "" {
+		if err := sendFrame(conn, "FRAME", []byte(*send)); err != nil {
+			fmt.Println("Error sending frame:", err)
 			return
 		}
-		if len(frame) == 0 {
-			fmt.Println("ping received; replying")
-			writeFrame(conn, nil) // heartbeat reply keeps the server's read deadline alive
-			continue
+		if _, err := readApplicationFrame(conn, reader); err != nil {
+			fmt.Println("Connection closed while waiting for response:", err)
 		}
-		fmt.Printf("Received: %s\n", frame)
+		return
+	}
+
+	fmt.Println("Enter frame payloads on separate lines. Exit with Ctrl+C or EOF.")
+
+	receiveDone := make(chan error, 1)
+	go func() {
+		receiveDone <- receiveLoop(conn, reader)
+	}()
+
+	input := make(chan string)
+	inputDone := make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		scanner.Buffer(make([]byte, 1024), maxFrame+1)
+		for scanner.Scan() {
+			input <- scanner.Text()
+		}
+		close(input)
+		inputDone <- scanner.Err()
+	}()
+
+	for {
+		select {
+		case line, ok := <-input:
+			if !ok {
+				err := <-inputDone
+				if err != nil {
+					fmt.Println("Error reading stdin:", err)
+				}
+				return
+			}
+			if line == "" {
+				fmt.Println("Empty input skipped; zero-length frames are reserved for heartbeats.")
+				continue
+			}
+			if err := sendFrame(conn, "FRAME", []byte(line)); err != nil {
+				fmt.Println("Error sending frame:", err)
+				return
+			}
+		case err := <-receiveDone:
+			if err != nil {
+				fmt.Println("Connection closed:", err)
+			}
+			return
+		}
 	}
 }
