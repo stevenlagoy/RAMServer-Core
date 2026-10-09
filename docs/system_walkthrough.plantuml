@@ -1,0 +1,74 @@
+@startuml walkthrough
+actor "Client A" as A
+actor "Client B" as B
+participant Server
+participant Session
+participant Match
+participant Game
+
+A -> Server: Hello
+Server -> A: Welcome(id=A)
+A -> Server: CreateLobby(game, public)
+Server -> Session ** : new Session(owner=A)
+Session -> A: LobbyState(owner=A)
+
+B -> Server: Hello
+Server -> B: Welcome(id=B)
+B -> Server: JoinLobby(sessionID)
+Session -> A: LobbyState(members=[A,B])
+Session -> B: LobbyState(members=[A,B])
+
+A -> Session: SetReady(true)
+B -> Session: SetReady(true)
+Session -> Game: ReadyToStart(roster, ready)
+Game --> Session: true
+Session -> Match ** : NewMatch(state=Game.NewState(order, roles))
+Session -> A: StateUpdate(ViewFor A)
+Session -> B: StateUpdate(ViewFor B)
+
+A -> Session: RequestLegalMoves
+Session -> Game: LegalActions(state, A)
+Game --> Session: [moves]
+Session -> A: LegalMoves([moves])
+
+A -> Session: SubmitAction(move1)
+Session -> Match: ApplyAction(move1)
+Match -> Game: ActiveTurn / Validate / Apply
+Game --> Match: state'
+Session -> A: StateUpdate
+Session -> B: StateUpdate
+
+B -> Session: SubmitAction(illegalMove)
+Session -> Match: ApplyAction(illegalMove)
+Match --> Session: error
+Session -> B: ActionRejected(reason)
+
+B -> Session: RequestLegalMoves / SubmitAction(move2)
+Session -> A: StateUpdate
+Session -> B: StateUpdate
+
+... several more turns ...
+
+A -> Session: SubmitAction(finalMove)
+Session -> Match: ApplyAction + Outcome()
+Match --> Session: (winner=A, true)
+Session -> A: MatchEnded(winner=A, turns=N)
+Session -> B: MatchEnded(winner=A, turns=N)
+Session -> Session: history append
+
+A -> Session: ReturnToLobby
+B -> Session: ReturnToLobby
+Session -> A: LobbyState(history=[...])
+Session -> B: LobbyState(history=[...])
+
+A -> Session: SetReady(true)
+B -> Session: SetReady(true)
+Session -> Match : NewMatch (round 2)
+
+... second round plays out the same way ...
+
+A -> Session: LeaveLobby
+Session -> B: LobbyState(owner=B, members=[B])
+B -> Session: LeaveLobby
+Server -> Session: (lobby empty, removed from store)
+@enduml
