@@ -35,6 +35,8 @@ go.work.sum
 server/gen/
 clients/client-1/gen/
 clients/client-2/gen/
+games/chess/compiled_client/gen/org/ramserver/proto/v1/
+games/chess/interpreted_client/gen/ramserver/v1/
 
 # Local data
 *.db
