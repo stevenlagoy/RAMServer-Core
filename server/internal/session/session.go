@@ -80,6 +80,7 @@ type sessionMsg struct {
 
 type joinMsg struct {
 	clientID string
+	seq      uint64 // request sequence, echoed on the joiner's StateUpdate
 	sender   Sender
 	reply    chan error
 }
@@ -97,16 +98,17 @@ type legalMovesMsg struct {
 
 var (
 	// Returned by Join when game's role limits have no room for participant
-	ErrLobbyFull = errors.New("lobby is full")
+	ErrLobbyFull = transport.WrapError(transport.CodeSessionNotJoinable, errors.New("lobby is full"))
 	// Returned by Join when a match is already in progress and game does not allow joining mid-match
-	ErrAlreadyStarted = errors.New("match already in progress")
+	ErrAlreadyStarted = transport.WrapError(transport.CodeSessionNotJoinable, errors.New("match already in progress"))
 )
 
-// Adds clientID to the lobby, blocking until Run processes the request or ctx is cancelled
-func (s *Session) Join(ctx context.Context, clientID string, sender Sender) error {
+// Adds clientID to the lobby, blocking until Run processes the request or ctx is cancelled.
+// seq is the JoinSessionRequest's sequence; the joiner's copy of the resulting StateUpdate replies to it.
+func (s *Session) Join(ctx context.Context, clientID string, seq uint64, sender Sender) error {
 	reply := make(chan error, 1)
 	select {
-	case s.inbox <- sessionMsg{join: &joinMsg{clientID: clientID, sender: sender, reply: reply}}:
+	case s.inbox <- sessionMsg{join: &joinMsg{clientID: clientID, seq: seq, sender: sender, reply: reply}}:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -118,7 +120,7 @@ func (s *Session) Join(ctx context.Context, clientID string, sender Sender) erro
 	}
 }
 
-// Removes clientID from the lobby. DOes not remove an empties Session; caller is reponsible for this
+// Removes clientID from the lobby. Does not remove an empties Session; caller is reponsible for this
 func (s *Session) Leave(ctx context.Context, clientID string) {
 	select {
 	case s.inbox <- sessionMsg{leave: &leaveMsg{clientID: clientID}}:
@@ -206,7 +208,7 @@ func (s *Session) handleJoin(j *joinMsg) {
 	}
 	s.members[j.clientID] = &Member{ClientID: j.clientID, Sender: j.sender, Role: role}
 	j.reply <- nil
-	s.broadcastLobbyState()
+	s.broadcastState(j.clientID, j.seq)
 }
 
 // Picks a role for a newly joining member. Returns "" if every role is at capacity.
@@ -238,7 +240,7 @@ func (s *Session) handleLeave(l *leaveMsg) {
 	if len(s.members) == 0 {
 		return // caller removes Session from store
 	}
-	s.broadcastLobbyState()
+	s.broadcastState("", 0)
 }
 
 func (s *Session) handleSetReady(r *setReadyMsg) {
@@ -251,7 +253,7 @@ func (s *Session) handleSetReady(r *setReadyMsg) {
 		s.startMatch()
 		return
 	}
-	s.broadcastLobbyState()
+	s.broadcastState("", 0)
 }
 
 func (s *Session) readyToStart() bool {
@@ -270,7 +272,7 @@ func (s *Session) startMatch() {
 		roles[id] = m.Role
 	}
 	s.current = match.NewMatch(s.Game, append([]string(nil), s.order...), roles) // copy order
-	s.broadcastState()
+	s.broadcastState("", 0)
 }
 
 func (s *Session) handleSubmit(action game.Action) {
@@ -281,11 +283,18 @@ func (s *Session) handleSubmit(action game.Action) {
 	if !ok {
 		return // stale action from a member who left
 	}
+	// Check for out of turn action request
 	if err := s.current.ApplyAction(action); err != nil {
-		member.Sender.Send(transport.EncodeReject(action.ID, err))
+		code := transport.CodeIllegalAction
+		if errors.Is(err, match.ErrNotYourTurn) {
+			code = transport.CodeOutOfTurn
+		}
+		perr := transport.WrapError(code, err)
+		perr.SessionID = s.ID
+		member.Sender.Send(transport.EncodeError(action.ID, perr))
 		return
 	}
-	s.broadcastState()
+	s.broadcastState(action.ActorID, action.ID)
 	if result, done := s.current.Outcome(); done {
 		s.endMatch(result)
 	}
@@ -308,49 +317,52 @@ func (s *Session) handleLegalMoves(l *legalMovesMsg) {
 	l.reply <- s.current.LegalActions(l.clientID)
 }
 
-// Presentation-ready snapshot passed to transport.EncodeLobbyState
-type LobbyView struct {
-	SessionID string
-	Owner     string
-	Members   []MemberView
-	History   []MatchResult
-}
-
-// Presentation-ready snapshot passed to transport.EncodeLobbyState
-type MemberView struct {
-	ClientID string
-	Role     game.Role
-	Ready    bool
-}
-
-func (s *Session) viewFor(memberID string) LobbyView {
-	members := make([]MemberView, 0, len(s.members))
-	for _, m := range s.members {
-		members = append(members, MemberView{ClientID: m.ClientID, Role: m.Role, Ready: m.Ready})
+// Builds memberID's StateUpdate
+func (s *Session) viewFor(memberID string) transport.StateUpdate {
+	players := make([]transport.SessionPlayer, 0, len(s.order))
+	for _, id := range s.order {
+		if _, ok := s.members[id]; ok {
+			// TODO: carry display names and connection status on Member
+			players = append(players, transport.SessionPlayer{PlayerID: id, Connected: true})
+		}
 	}
-	return LobbyView{SessionID: s.ID, Owner: s.Owner(), Members: members, History: s.history}
+	view := transport.StateUpdate{
+		SessionID: s.ID,
+		GameID:    s.GameName,
+		Status:    transport.StatusWaiting,
+		Players:   players,
+		// TODO: StateVersion, and EncodedView once Game.ViewFor returns game-encoded bytes
+	}
+	if s.current != nil {
+		view.Status = transport.StatusInProgress
+		view.PlayerOrder = s.current.RosterOrder
+		if active := s.current.Game.ActiveTurn(s.current.State); len(active) == 1 {
+			view.ActivePlayerID = active[0]
+		}
+	}
+	return view
 }
 
-func (s *Session) broadcastLobbyState() {
+// Sends each member its StateUpdate. requesterID's copy replies to seq; all others are unsolicited
+func (s *Session) broadcastState(requesterID string, seq uint64) {
 	for id, m := range s.members {
-		m.Sender.Send(transport.EncodeLobbyState(s.viewFor(id)))
+		var inReplyTo uint64
+		if id == requesterID {
+			inReplyTo = seq
+		}
+		m.Sender.Send(transport.EncodeStateUpdate(inReplyTo, s.viewFor(id)))
 	}
-}
-
-func (s *Session) broadcastState() {
-	for id, m := range s.members {
-		m.Sender.Send(transport.EncodeLobbyState(s.viewFor(id)))
-	}
-}
-
-// Plain snapshot passed to transport.EncodeMatchEnded
-type MatchEndedView struct {
-	Result game.Result
-	Turns  int
 }
 
 func (s *Session) broadcastMatchEnded(result game.Result, turns int) {
+	// TODO: per-player summaries from the action log, and end reasons other than completion
+	payload := transport.EncodeMatchResult(transport.MatchResult{
+		SessionID:       s.ID,
+		WinnerPlayerIDs: result.WinnerIDs,
+		Draw:            result.Draw,
+		Reason:          transport.EndCompleted,
+	})
 	for _, m := range s.members {
-		m.Sender.Send(transport.EncodeMatchEnded(MatchEndedView{Result: result, Turns: turns}))
+		m.Sender.Send(payload) // identical for every recipient, so the slice is shared
 	}
 }
