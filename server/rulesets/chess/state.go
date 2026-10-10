@@ -15,9 +15,9 @@ var Files = map[uint8]rune{1: 'a', 2: 'b', 3: 'c', 4: 'd', 5: 'e', 6: 'f', 7: 'g
 
 // One space on the chessboard
 type Square struct {
-	rank uint8 // 1, 2, 3, 4, 5, 6, 7, 8
-	file uint8 // a, b, c, d, e, f, g, h
-	// Square previously had `resident *Piece` but this was removed. Could be readded for better performance, but requires special initialization logic.
+	rank     uint8 // 1, 2, 3, 4, 5, 6, 7, 8
+	file     uint8 // a, b, c, d, e, f, g, h
+	occupant *Piece
 }
 
 // Get the shade of a square, "light" or "dark"
@@ -44,7 +44,7 @@ func makeSquares() [squaresPerRank * squaresPerFile]*Square {
 	for i := range squaresPerRank * squaresPerFile {
 		rank := uint8(i / squaresPerRank)
 		file := uint8(i % squaresPerFile)
-		squares[i] = &Square{rank, file}
+		squares[i] = &Square{rank, file, nil}
 	}
 	return squares
 }
@@ -111,7 +111,7 @@ func (s State) isLegal(m Move) bool {
 	// Check that the moved piece is allowed to move that way
 	var movementPattern *MovementPattern = nil
 	for _, pattern := range m.piece.pieceType.movementPatterns {
-		if pattern.evaluate(*m.From, *m.To, m.capturing) {
+		if pattern.evaluate(*m.From, *m.To, s) {
 			movementPattern = &pattern
 			break
 		}
@@ -165,9 +165,8 @@ func (s State) apply(m Move) State {
 		// Apply the move
 
 		// Add history
-		// TODO: Check that this actually works once Deep Copy is implemented
-		newState.stateHistory = s.stateHistory + s
-		newState.moveHistory = s.moveHistory + m
+		newState.stateHistory = append(s.stateHistory, s)
+		newState.moveHistory = append(s.moveHistory, m)
 
 		// Adjust counters
 		// Adjust halfmove
