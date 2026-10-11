@@ -70,7 +70,7 @@ func getTime() string {
 }
 
 // Short label for a client message, shown in the log
-func clientKind(msg *pb.ClientMessage) string {
+func clientMessageKind(msg *pb.ClientMessage) string {
 	switch msg.GetPayload().(type) {
 	case *pb.ClientMessage_ConnectRequest:
 		return "CONNECT"
@@ -88,7 +88,7 @@ func clientKind(msg *pb.ClientMessage) string {
 }
 
 // Short label for a server message, shown in the log
-func serverKind(msg *pb.ServerMessage) string {
+func serverMessageKind(msg *pb.ServerMessage) string {
 	switch msg.GetPayload().(type) {
 	case *pb.ServerMessage_ConnectResponse:
 		return "CONNECTED"
@@ -223,7 +223,7 @@ func (c *client) send(msg *pb.ClientMessage) error {
 	if err := c.writeRaw(frame); err != nil {
 		return err
 	}
-	logLine("->", clientKind(msg), prototext.MarshalOptions{}.Format(msg))
+	logLine("->", clientMessageKind(msg), prototext.MarshalOptions{}.Format(msg))
 	return nil
 }
 
@@ -255,7 +255,7 @@ func (c *client) next() (*pb.ServerMessage, error) {
 			continue
 		}
 		c.track(&msg)
-		logLine("<-", serverKind(&msg), prototext.MarshalOptions{}.Format(&msg))
+		logLine("<-", serverMessageKind(&msg), prototext.MarshalOptions{}.Format(&msg))
 		return &msg, nil
 	}
 }
