@@ -1,19 +1,21 @@
 # RAMServer Wire Protocol - v1
 
+Protocol Version: 1.0
+
 Schema file: [`proto/ramserver/v1/ramserver.proto`](../proto/ramserver/v1/ramserver.proto) (package `ramserver.v1`, `proto3` syntax)
 
 This document explains every message, field, and enum in the schema, and the order in which messages are exchanged. For how bytes are delimited on the TCP stream, see [Message Framing](framing.md).
 
 ## Schema overview
 
-| Section in the proto        | Messages / enums                                                       |
-| --------------------------- | ---------------------------------------------------------------------- |
-| Envelopes                   | `ClientMessage`, `ServerMessage`                                       |
-| Connection & authentication | `ConnectRequest`, `ConnectResponse`, `AuthRequest`, `AuthResponse`       |
-| Session membership          | `JoinSessionRequest`, `LeaveSessionRequest`, `LeaveSessionResponse`     |
-| Session actions & state     | `ActionRequest`, `StateUpdate`, `SessionPlayer`, `SessionStatus`       |
-| Errors                      | `ErrorResponse`, `ErrorCode`                                           |
-| Match completion            | `MatchResult`, `MatchEndReason`, `PlayerActionSummary`                 |
+| Section in the proto        | Messages / enums                                                    |
+| --------------------------- | ------------------------------------------------------------------- |
+| Envelopes                   | `ClientMessage`, `ServerMessage`                                    |
+| Connection & authentication | `ConnectRequest`, `ConnectResponse`, `AuthRequest`, `AuthResponse`  |
+| Session membership          | `JoinSessionRequest`, `LeaveSessionRequest`, `LeaveSessionResponse` |
+| Session actions & state     | `ActionRequest`, `StateUpdate`, `SessionPlayer`, `SessionStatus`    |
+| Errors                      | `ErrorResponse`, `ErrorCode`                                        |
+| Match completion            | `MatchResult`, `MatchEndReason`, `PlayerActionSummary`              |
 
 **Generated code.** Generated code is not committed; run `buf generate` after any change under `proto/` (see the [README](../README.md)). The file options control the generated packages:
 
@@ -28,40 +30,40 @@ Each frame payload (see [framing.md](framing.md)) is one serialized envelope: `C
 
 **`ClientMessage`**
 
-| #   | Field                | Type               |
-| --- | -------------------- | ------------------ |
-| 1   | `sequence`             | `uint64`             |
-| 2   | `connect_request`      | `ConnectRequest`     |
-| 3   | `auth_request`         | `AuthRequest`        |
-| 4   | `join_session_request` | `JoinSessionRequest` |
-| 5   | `leave_session_request`| `LeaveSessionRequest`|
-| 6   | `action_request`       | `ActionRequest`      |
+| #   | Field                   | Type                  |
+| --- | ----------------------- | --------------------- |
+| 1   | `sequence`              | `uint64`              |
+| 2   | `connect_request`       | `ConnectRequest`      |
+| 3   | `auth_request`          | `AuthRequest`         |
+| 4   | `join_session_request`  | `JoinSessionRequest`  |
+| 5   | `leave_session_request` | `LeaveSessionRequest` |
+| 6   | `action_request`        | `ActionRequest`       |
 
 - `sequence` - a client-assigned, monotonically increasing counter used to correlate a response with the request that caused it.
 
 **`ServerMessage`**
 
-| #   | Field                 | Type                |
-| --- | --------------------- | ------------------- |
-| 1   | `in_reply_to`           | `uint64`              |
-| 2   | `connect_response`      | `ConnectResponse`     |
-| 3   | `auth_response`         | `AuthResponse`        |
-| 4   | `state_update`          | `StateUpdate`         |
-| 5   | `error_response`        | `ErrorResponse`       |
-| 6   | `match_result`          | `MatchResult`         |
+| #   | Field                    | Type                   |
+| --- | ------------------------ | ---------------------- |
+| 1   | `in_reply_to`            | `uint64`               |
+| 2   | `connect_response`       | `ConnectResponse`      |
+| 3   | `auth_response`          | `AuthResponse`         |
+| 4   | `state_update`           | `StateUpdate`          |
+| 5   | `error_response`         | `ErrorResponse`        |
+| 6   | `match_result`           | `MatchResult`          |
 | 7   | `leave_session_response` | `LeaveSessionResponse` |
 
 - `in_reply_to` - echoes the `sequence` of the client message this is a direct response to. For unsolicited server pushes, such as broadcasts to everyone in a session, this is `0`. Clients should therefore start `sequence` at `1`.
 
 **Every request gets exactly one direct reply.** The server answers each `ClientMessage` with exactly one `ServerMessage` whose `in_reply_to` equals that message's `sequence`. On failure the reply is an `ErrorResponse`. On success it is:
 
-| Request            | Success reply                                                                  |
-| ------------------ | ------------------------------------------------------------------------------ |
-| `ConnectRequest`      | `ConnectResponse`                                                              |
-| `AuthRequest`         | `AuthResponse`                                                                 |
-| `JoinSessionRequest`  | The requester's copy of the `StateUpdate` broadcast that includes them         |
-| `LeaveSessionRequest` | `LeaveSessionResponse`                                                         |
-| `ActionRequest`       | The requester's copy of the `StateUpdate` broadcast produced by the action     |
+| Request               | Success reply                                                              |
+| --------------------- | -------------------------------------------------------------------------- |
+| `ConnectRequest`      | `ConnectResponse`                                                          |
+| `AuthRequest`         | `AuthResponse`                                                             |
+| `JoinSessionRequest`  | The requester's copy of the `StateUpdate` broadcast that includes them     |
+| `LeaveSessionRequest` | `LeaveSessionResponse`                                                     |
+| `ActionRequest`       | The requester's copy of the `StateUpdate` broadcast produced by the action |
 
 Other players' copies of the same broadcast carry `in_reply_to = 0`. A client can therefore treat any reply with a matching `in_reply_to` as the outcome of its request.
 
@@ -126,15 +128,15 @@ A **session** is one instance of a game, from the moment it is created until it 
 
 ### 3. Session
 
-| Message             | Direction                                                 | Sent when                                                                        |
-| ------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Message                | Direction                                                 | Sent when                                                                        |
+| ---------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `JoinSessionRequest`   | client → server                                           | A player requests to join a session for a game.                                  |
 | `LeaveSessionRequest`  | client → server                                           | A player requests to leave a session.                                            |
 | `LeaveSessionResponse` | server → client                                           | In reply to a successful `LeaveSessionRequest`.                                  |
 | `ActionRequest`        | client → server                                           | A player submits a game-defined action, in any phase: a start vote, a move, etc. |
-| `StateUpdate`       | server → client (broadcast to all players in the session) | Whenever membership, connection status, session status, or game state changes.   |
-| `ErrorResponse`     | server → client                                           | A request is rejected, or any other protocol-level error occurs.                 |
-| `MatchResult`       | server → client (broadcast to all players in the session) | The match ends, normally or otherwise.                                           |
+| `StateUpdate`          | server → client (broadcast to all players in the session) | Whenever membership, connection status, session status, or game state changes.   |
+| `ErrorResponse`        | server → client                                           | A request is rejected, or any other protocol-level error occurs.                 |
+| `MatchResult`          | server → client (broadcast to all players in the session) | The match ends, normally or otherwise.                                           |
 
 The core and the game split responsibility:
 
@@ -197,14 +199,14 @@ A rejected action leaves the session state unchanged and produces no `StateUpdat
 
 **`SessionStatus`**
 
-| Value                        | #   | Meaning                                                                                                                  |
-| ---------------------------- | --- | ------------------------------------------------------------------------------------------------------------------------ |
-| `SESSION_STATUS_UNSPECIFIED` | 0   | Default; never sent intentionally.                                                                                       |
-| `SESSION_STATUS_WAITING`     | 1   | Players are gathering and the match has not started. It does not imply a particular player count.                       |
+| Value                        | #   | Meaning                                                                                                                       |
+| ---------------------------- | --- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `SESSION_STATUS_UNSPECIFIED` | 0   | Default; never sent intentionally.                                                                                            |
+| `SESSION_STATUS_WAITING`     | 1   | Players are gathering and the match has not started. It does not imply a particular player count.                             |
 | `SESSION_STATUS_READY`       | 2   | The game reports that its readiness condition is met. Informational only; it does not authorize a particular player to start. |
-| `SESSION_STATUS_STARTING`    | 3   | The game has initiated match startup and is setting up initial state.                                                    |
-| `SESSION_STATUS_IN_PROGRESS` | 4   | The match is being played.                                                                                               |
-| `SESSION_STATUS_CLOSED`      | 5   | The session has ended or been abandoned and accepts no further joins or actions.                                         |
+| `SESSION_STATUS_STARTING`    | 3   | The game has initiated match startup and is setting up initial state.                                                         |
+| `SESSION_STATUS_IN_PROGRESS` | 4   | The match is being played.                                                                                                    |
+| `SESSION_STATUS_CLOSED`      | 5   | The session has ended or been abandoned and accepts no further joins or actions.                                              |
 
 **`ErrorResponse`**
 
@@ -216,23 +218,23 @@ Usable in any phase. When it answers a specific request, the envelope's `in_repl
 
 **`ErrorCode`**
 
-| Code                                  | #   | Meaning                                                                                                   |
-| ------------------------------------- | --- | --------------------------------------------------------------------------------------------------------- |
-| `ERROR_CODE_UNSPECIFIED`              | 0   | Default; never sent intentionally.                                                                        |
-| `ERROR_CODE_INVALID_PROTOCOL_VERSION` | 1   | Client's `protocol_version` major version differs from the server's.                                      |
-| `ERROR_CODE_AUTH_FAILED`              | 2   | Unknown `player_id`, or `reconnect_token` did not match.                                                  |
-| `ERROR_CODE_UNKNOWN_GAME`             | 3   | `game_id` has no registered game.                                                                         |
-| `ERROR_CODE_SESSION_NOT_FOUND`        | 4   | `session_id` does not exist.                                                                              |
-| `ERROR_CODE_SESSION_NOT_JOINABLE`     | 5   | The session refused a join: already started, closed, full, or refused by the game's admission rules.      |
-| `ERROR_CODE_OUT_OF_TURN`              | 6   | Action submitted by a player who is not `active_player_id`.                                               |
-| `ERROR_CODE_ILLEGAL_ACTION`           | 7   | Action refused by the game in the session's current phase.                                                |
-| `ERROR_CODE_MALFORMED_MESSAGE`        | 8   | An envelope, or an opaque action payload, could not be parsed.                                            |
+| Code                                  | #   | Meaning                                                                                                                            |
+| ------------------------------------- | --- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `ERROR_CODE_UNSPECIFIED`              | 0   | Default; never sent intentionally.                                                                                                 |
+| `ERROR_CODE_INVALID_PROTOCOL_VERSION` | 1   | Client's `protocol_version` major version differs from the server's.                                                               |
+| `ERROR_CODE_AUTH_FAILED`              | 2   | Unknown `player_id`, or `reconnect_token` did not match.                                                                           |
+| `ERROR_CODE_UNKNOWN_GAME`             | 3   | `game_id` has no registered game.                                                                                                  |
+| `ERROR_CODE_SESSION_NOT_FOUND`        | 4   | `session_id` does not exist.                                                                                                       |
+| `ERROR_CODE_SESSION_NOT_JOINABLE`     | 5   | The session refused a join: already started, closed, full, or refused by the game's admission rules.                               |
+| `ERROR_CODE_OUT_OF_TURN`              | 6   | Action submitted by a player who is not `active_player_id`.                                                                        |
+| `ERROR_CODE_ILLEGAL_ACTION`           | 7   | Action refused by the game in the session's current phase.                                                                         |
+| `ERROR_CODE_MALFORMED_MESSAGE`        | 8   | An envelope, or an opaque action payload, could not be parsed.                                                                     |
 | `ERROR_CODE_INVALID_STATE`            | 9   | Message not valid in the connection's current phase, such as `JoinGameRequest` before `AuthResponse` or a second `ConnectRequest`. |
-| `ERROR_CODE_NOT_IN_SESSION`           | 10  | The session exists, but the sender is not a member of it.                                                 |
-| `ERROR_CODE_ALREADY_IN_SESSION`       | 11  | `JoinGameRequest` sent by a player who is already a member of a session.                                  |
-| `ERROR_CODE_INVALID_ARGUMENT`         | 12  | A field failed validation, such as an empty or overly long `display_name` or an empty `game_id`.          |
-| `ERROR_CODE_STALE_STATE`              | 13  | `expected_state_version` did not match the session's current `state_version`.                            |
-| `ERROR_CODE_INTERNAL`                 | 14  | The server failed while handling an otherwise valid request. Session state is unchanged.                  |
+| `ERROR_CODE_NOT_IN_SESSION`           | 10  | The session exists, but the sender is not a member of it.                                                                          |
+| `ERROR_CODE_ALREADY_IN_SESSION`       | 11  | `JoinGameRequest` sent by a player who is already a member of a session.                                                           |
+| `ERROR_CODE_INVALID_ARGUMENT`         | 12  | A field failed validation, such as an empty or overly long `display_name` or an empty `game_id`.                                   |
+| `ERROR_CODE_STALE_STATE`              | 13  | `expected_state_version` did not match the session's current `state_version`.                                                      |
+| `ERROR_CODE_INTERNAL`                 | 14  | The server failed while handling an otherwise valid request. Session state is unchanged.                                           |
 
 **`MatchResult`**
 
@@ -244,13 +246,13 @@ Usable in any phase. When it answers a specific request, the envelope's `in_repl
 
 **`MatchEndReason`**
 
-| Value                          | #   | Meaning                                                                 |
-| ------------------------------ | --- | ----------------------------------------------------------------------- |
-| `MATCH_END_REASON_UNSPECIFIED` | 0   | Default; never sent intentionally.                                      |
-| `MATCH_END_REASON_COMPLETED`   | 1   | The game reached a win, loss, or draw condition.                        |
-| `MATCH_END_REASON_FORFEIT`     | 2   | A player left an in-progress match and the game ended it.               |
+| Value                          | #   | Meaning                                                                    |
+| ------------------------------ | --- | -------------------------------------------------------------------------- |
+| `MATCH_END_REASON_UNSPECIFIED` | 0   | Default; never sent intentionally.                                         |
+| `MATCH_END_REASON_COMPLETED`   | 1   | The game reached a win, loss, or draw condition.                           |
+| `MATCH_END_REASON_FORFEIT`     | 2   | A player left an in-progress match and the game ended it.                  |
 | `MATCH_END_REASON_DISCONNECT`  | 3   | A player's connection dropped and was not resumed within the grace period. |
-| `MATCH_END_REASON_ABORTED`     | 4   | The server ended the match, such as on shutdown or an internal error.  |
+| `MATCH_END_REASON_ABORTED`     | 4   | The server ended the match, such as on shutdown or an internal error.      |
 
 **`PlayerActionSummary`**
 
