@@ -10,6 +10,7 @@ import (
 
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
 	"github.com/stevenlagoy/ramserver-core/server/internal/game"
+	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
 
 // fakeSender records every frame a Session sends to one member
@@ -134,5 +135,35 @@ func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 	}
 	if order := state.GetPlayerOrder(); len(order) != 1 || order[0] != "a" {
 		t.Fatalf("player_order = %v, want [a]", order)
+	}
+}
+
+// Joins refused by the session reach clients as ERROR_CODE_SESSION_NOT_JOINABLE. Tested here
+// because a match cannot yet be started over the protocol.
+func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
+	s, ctx := startSession(t, &game.StubGame{})
+	a := newFakeSender()
+	if err := s.Join(ctx, "a", "", 1, "", a); err != nil {
+		t.Fatal(err)
+	}
+	a.next(t)
+	s.SetReady(ctx, "a", true)
+	if state := a.next(t).GetStateUpdate(); state.GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
+		t.Fatalf("expected match to start, got %v", state)
+	}
+
+	err := s.Join(ctx, "b", "", 2, "", newFakeSender())
+	var perr *transport.Error
+	if !errors.Is(err, ErrAlreadyStarted) || !errors.As(err, &perr) || perr.Code != transport.CodeSessionNotJoinable {
+		t.Fatalf("err = %v, want ErrAlreadyStarted with CodeSessionNotJoinable", err)
+	}
+}
+
+func TestFullLobbyAndRoleAreNotJoinable(t *testing.T) {
+	for _, err := range []error{ErrLobbyFull, ErrRoleFull} {
+		var perr *transport.Error
+		if !errors.As(err, &perr) || perr.Code != transport.CodeSessionNotJoinable {
+			t.Errorf("%v has code %v, want CodeSessionNotJoinable", err, perr)
+		}
 	}
 }

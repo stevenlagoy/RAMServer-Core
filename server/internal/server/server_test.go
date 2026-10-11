@@ -188,10 +188,74 @@ func authenticate(t *testing.T, addr, displayName string) (net.Conn, *bufio.Read
 		Payload:  &pb.ClientMessage_AuthRequest{AuthRequest: &pb.AuthRequest{DisplayName: displayName}},
 	})
 	resp := expectMessage(t, conn, r)
-	if resp.GetAuthResponse() == nil {
-		t.Fatalf("expected AuthResponse, got %v", resp)
+	auth := resp.GetAuthResponse()
+	if auth == nil || resp.GetInReplyTo() != 2 {
+		t.Fatalf("expected AuthResponse in reply to 2, got %v", resp)
 	}
-	return conn, r, resp.GetAuthResponse().GetPlayerId()
+	if auth.GetPlayerId() == "" || auth.GetReconnectToken() == "" || auth.GetPlayerId() == auth.GetReconnectToken() {
+		t.Fatalf("expected a server-issued player_id and a separate reconnect_token, got %v", auth)
+	}
+	return conn, r, auth.GetPlayerId()
+}
+
+// connectOnly dials addr and completes ConnectRequest but not AuthRequest
+func connectOnly(t *testing.T, addr string) (net.Conn, *bufio.Reader) {
+	t.Helper()
+	conn := dialTestClient(t, addr)
+	r := bufio.NewReader(conn)
+	sendMessage(t, conn, connectRequest(1, transport.ProtocolVersion))
+	if resp := expectMessage(t, conn, r); resp.GetConnectResponse() == nil {
+		t.Fatalf("expected ConnectResponse, got %v", resp)
+	}
+	return conn, r
+}
+
+// expectError reads the next message and fails unless it is an ErrorResponse with code, replying to seq
+func expectError(t *testing.T, conn net.Conn, r *bufio.Reader, seq uint64, code pb.ErrorCode) {
+	t.Helper()
+	resp := expectMessage(t, conn, r)
+	if resp.GetInReplyTo() != seq || resp.GetErrorResponse().GetCode() != code {
+		t.Fatalf("expected %v in reply to %d, got %v", code, seq, resp)
+	}
+}
+
+func connectRequest(seq uint64, version string) *pb.ClientMessage {
+	return &pb.ClientMessage{
+		Sequence: seq,
+		Payload:  &pb.ClientMessage_ConnectRequest{ConnectRequest: &pb.ConnectRequest{ProtocolVersion: version}},
+	}
+}
+
+func authRequest(seq uint64, displayName string) *pb.ClientMessage {
+	return &pb.ClientMessage{
+		Sequence: seq,
+		Payload:  &pb.ClientMessage_AuthRequest{AuthRequest: &pb.AuthRequest{DisplayName: displayName}},
+	}
+}
+
+func joinRequest(seq uint64, gameID, sessionID string) *pb.ClientMessage {
+	return &pb.ClientMessage{
+		Sequence: seq,
+		Payload:  &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{GameId: gameID, SessionId: sessionID}},
+	}
+}
+
+func leaveRequest(seq uint64, sessionID string) *pb.ClientMessage {
+	return &pb.ClientMessage{
+		Sequence: seq,
+		Payload:  &pb.ClientMessage_LeaveSessionRequest{LeaveSessionRequest: &pb.LeaveSessionRequest{SessionId: sessionID}},
+	}
+}
+
+// createSession sends a JoinSessionRequest with no session_id and returns the new session's id
+func createSession(t *testing.T, conn net.Conn, r *bufio.Reader, seq uint64) string {
+	t.Helper()
+	sendMessage(t, conn, joinRequest(seq, "stub", ""))
+	resp := expectMessage(t, conn, r)
+	if resp.GetStateUpdate() == nil || resp.GetInReplyTo() != seq {
+		t.Fatalf("expected StateUpdate in reply to %d, got %v", seq, resp)
+	}
+	return resp.GetStateUpdate().GetSessionId()
 }
 
 func TestCreatorReceivesStateUpdate(t *testing.T) {
@@ -282,5 +346,144 @@ func TestJoinRejectsUnsupportedRequestedRole(t *testing.T) {
 	resp := expectMessage(t, conn, r)
 	if resp.GetInReplyTo() != 3 || resp.GetErrorResponse().GetCode() != pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT {
 		t.Fatalf("expected ERROR_CODE_INVALID_ARGUMENT in reply to 3, got %v", resp)
+	}
+}
+
+func TestHandshakeIssuesUniqueIdentities(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	_, _, alice := authenticate(t, addr, "Alice")
+	_, _, alsoAlice := authenticate(t, addr, "Alice") // same display name, different identity
+	if alice == alsoAlice {
+		t.Fatalf("two connections were issued the same player_id %q", alice)
+	}
+}
+
+func TestIncompatibleVersionDisconnects(t *testing.T) {
+	cfg := testConfig()
+	cfg.ReadTimeout = 5 * time.Second // long, so only the version check can close the connection
+	cfg.FirstMessageTimeout = 5 * time.Second
+	cfg.CloseTimeout = 100 * time.Millisecond
+	addr, stopServer := startTestServer(t, cfg)
+	defer stopServer()
+	conn := dialTestClient(t, addr)
+	r := bufio.NewReader(conn)
+
+	sendMessage(t, conn, connectRequest(1, "2.0"))
+	expectError(t, conn, r, 1, pb.ErrorCode_ERROR_CODE_INVALID_PROTOCOL_VERSION)
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := io.Copy(io.Discard, r); err != nil {
+		t.Fatalf("expected the server to close the connection, got %v", err)
+	}
+}
+
+func TestMessagesBeforeAuthRejected(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+
+	conn := dialTestClient(t, addr)
+	r := bufio.NewReader(conn)
+	sendMessage(t, conn, authRequest(1, "Alice")) // Auth before Connect
+	expectError(t, conn, r, 1, pb.ErrorCode_ERROR_CODE_INVALID_STATE)
+
+	conn, r = connectOnly(t, addr)
+	sendMessage(t, conn, joinRequest(2, "stub", "")) // session message before Auth
+	expectError(t, conn, r, 2, pb.ErrorCode_ERROR_CODE_INVALID_STATE)
+	sendMessage(t, conn, connectRequest(3, transport.ProtocolVersion)) // second Connect
+	expectError(t, conn, r, 3, pb.ErrorCode_ERROR_CODE_INVALID_STATE)
+}
+
+func TestHandshakeMessagesAfterAuthRejected(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	conn, r, _ := authenticate(t, addr, "Alice")
+
+	sendMessage(t, conn, connectRequest(3, transport.ProtocolVersion))
+	expectError(t, conn, r, 3, pb.ErrorCode_ERROR_CODE_INVALID_STATE)
+	sendMessage(t, conn, authRequest(4, "Alice"))
+	expectError(t, conn, r, 4, pb.ErrorCode_ERROR_CODE_INVALID_STATE)
+}
+
+func TestAuthRequiresDisplayName(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	conn, r := connectOnly(t, addr)
+
+	sendMessage(t, conn, authRequest(2, ""))
+	expectError(t, conn, r, 2, pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT)
+}
+
+func TestLeaveSession(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, aliceID := authenticate(t, addr, "Alice")
+	bob, bobR, _ := authenticate(t, addr, "Bob")
+	sessionID := createSession(t, alice, aliceR, 3)
+	sendMessage(t, bob, joinRequest(3, "stub", sessionID))
+	expectMessage(t, bob, bobR)     // Bob's join reply
+	expectMessage(t, alice, aliceR) // Alice's copy of the join broadcast
+
+	sendMessage(t, bob, leaveRequest(4, sessionID))
+	resp := expectMessage(t, bob, bobR)
+	if resp.GetInReplyTo() != 4 || resp.GetLeaveSessionResponse().GetSessionId() != sessionID {
+		t.Fatalf("expected LeaveSessionResponse for %q in reply to 4, got %v", sessionID, resp)
+	}
+	players := expectMessage(t, alice, aliceR).GetStateUpdate().GetPlayers()
+	if len(players) != 1 || players[0].GetPlayerId() != aliceID {
+		t.Fatalf("expected only Alice left in the session, got %v", players)
+	}
+}
+
+func TestJoinSessionErrors(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, _ := authenticate(t, addr, "Alice")
+	sessionID := createSession(t, alice, aliceR, 3)
+	bob, bobR, _ := authenticate(t, addr, "Bob")
+
+	tests := []struct {
+		name string
+		msg  *pb.ClientMessage
+		code pb.ErrorCode
+	}{
+		{"empty game_id", joinRequest(10, "", ""), pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT},
+		{"unknown game", joinRequest(11, "nope", ""), pb.ErrorCode_ERROR_CODE_UNKNOWN_GAME},
+		{"unknown session", joinRequest(12, "stub", "session-missing"), pb.ErrorCode_ERROR_CODE_SESSION_NOT_FOUND},
+		{"session for another game", joinRequest(13, "chess", sessionID), pb.ErrorCode_ERROR_CODE_SESSION_NOT_FOUND},
+		{"leave without a session", leaveRequest(14, sessionID), pb.ErrorCode_ERROR_CODE_NOT_IN_SESSION},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sendMessage(t, bob, tt.msg)
+			expectError(t, bob, bobR, tt.msg.GetSequence(), tt.code)
+		})
+	}
+}
+
+func TestPlayerCannotJoinTwoSessions(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, _ := authenticate(t, addr, "Alice")
+	bob, bobR, _ := authenticate(t, addr, "Bob")
+	aliceSession := createSession(t, alice, aliceR, 3)
+	bobSession := createSession(t, bob, bobR, 3)
+
+	sendMessage(t, alice, joinRequest(4, "stub", ""))
+	expectError(t, alice, aliceR, 4, pb.ErrorCode_ERROR_CODE_ALREADY_IN_SESSION)
+	sendMessage(t, alice, joinRequest(5, "stub", bobSession))
+	expectError(t, alice, aliceR, 5, pb.ErrorCode_ERROR_CODE_ALREADY_IN_SESSION)
+
+	sendMessage(t, alice, leaveRequest(6, bobSession)) // a session Alice is not a member of
+	expectError(t, alice, aliceR, 6, pb.ErrorCode_ERROR_CODE_NOT_IN_SESSION)
+	sendMessage(t, alice, &pb.ClientMessage{
+		Sequence: 7,
+		Payload:  &pb.ClientMessage_ActionRequest{ActionRequest: &pb.ActionRequest{SessionId: bobSession, EncodedAction: []byte("move")}},
+	})
+	expectError(t, alice, aliceR, 7, pb.ErrorCode_ERROR_CODE_NOT_IN_SESSION)
+
+	sendMessage(t, alice, leaveRequest(8, aliceSession)) // still a member of her own session
+	if resp := expectMessage(t, alice, aliceR); resp.GetLeaveSessionResponse() == nil {
+		t.Fatalf("expected Alice to still be in her own session, got %v", resp)
 	}
 }
