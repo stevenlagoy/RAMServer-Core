@@ -81,8 +81,7 @@ type sessionMsg struct {
 type joinMsg struct {
 	clientID    string
 	displayName string
-	seq         uint64    // request sequence, echoed on the joiner's StateUpdate
-	role        game.Role // requested role; "" lets the session assign one
+	seq         uint64 // request sequence, echoed on the joiner's StateUpdate
 	sender      Sender
 	reply       chan error
 }
@@ -101,10 +100,6 @@ type legalMovesMsg struct {
 var (
 	// Returned by Join when game's role limits have no room for participant
 	ErrLobbyFull = transport.WrapError(transport.CodeSessionNotJoinable, errors.New("lobby is full"))
-	// Returned by Join when the requested role is at capacity
-	ErrRoleFull = transport.WrapError(transport.CodeSessionNotJoinable, errors.New("requested role is full"))
-	// Returned by Join when the game does not declare the requested role
-	ErrUnknownRole = transport.WrapError(transport.CodeInvalidArgument, errors.New("game does not support the requested role"))
 	// Returned by Join when a match is already in progress and game does not allow joining mid-match
 	ErrAlreadyStarted = transport.WrapError(transport.CodeSessionNotJoinable, errors.New("match already in progress"))
 )
@@ -112,11 +107,10 @@ var (
 // Adds clientID to the lobby, blocking until Run processes the request or ctx is cancelled.
 // displayName is shown to other members in StateUpdate rosters; it is never used as identity.
 // seq is the JoinSessionRequest's sequence; the joiner's copy of the resulting StateUpdate replies to it.
-// role is the requested role, or "" to let the session assign the first role with room.
-func (s *Session) Join(ctx context.Context, clientID, displayName string, seq uint64, role game.Role, sender Sender) error {
+func (s *Session) Join(ctx context.Context, clientID, displayName string, seq uint64, sender Sender) error {
 	reply := make(chan error, 1)
 	select {
-	case s.inbox <- sessionMsg{join: &joinMsg{clientID: clientID, displayName: displayName, seq: seq, role: role, sender: sender, reply: reply}}:
+	case s.inbox <- sessionMsg{join: &joinMsg{clientID: clientID, displayName: displayName, seq: seq, sender: sender, reply: reply}}:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -206,9 +200,9 @@ func (s *Session) handleJoin(j *joinMsg) {
 		j.reply <- ErrAlreadyStarted
 		return
 	}
-	role, err := s.assignRole(j.role)
-	if err != nil {
-		j.reply <- err
+	role := s.assignRole()
+	if role == "" {
+		j.reply <- ErrLobbyFull
 		return
 	}
 	if _, exists := s.members[j.clientID]; !exists {
@@ -219,28 +213,18 @@ func (s *Session) handleJoin(j *joinMsg) {
 	s.broadcastState(j.clientID, j.seq)
 }
 
-// Picks a role for a newly joining member: requested if non-empty, otherwise the first
-// declared role with room
-func (s *Session) assignRole(requested game.Role) (game.Role, error) {
+// Picks the first role the game declares that still has room. Returns "" if every role is at capacity.
+func (s *Session) assignRole() game.Role {
 	counts := make(map[game.Role]int)
 	for _, m := range s.members {
 		counts[m.Role]++
 	}
 	for _, spec := range s.Game.Roles() {
-		hasRoom := spec.Max == 0 || counts[spec.Name] < spec.Max
-		switch {
-		case requested == "" && hasRoom:
-			return spec.Name, nil
-		case spec.Name == requested && hasRoom:
-			return spec.Name, nil
-		case spec.Name == requested:
-			return "", ErrRoleFull
+		if spec.Max == 0 || counts[spec.Name] < spec.Max {
+			return spec.Name
 		}
 	}
-	if requested != "" {
-		return "", ErrUnknownRole
-	}
-	return "", ErrLobbyFull
+	return ""
 }
 
 func (s *Session) handleLeave(l *leaveMsg) {
@@ -340,7 +324,7 @@ func (s *Session) viewFor(memberID string) transport.StateUpdate {
 	for _, id := range s.order {
 		if m, ok := s.members[id]; ok {
 			// TODO: track connection status on Member once disconnects keep members (reconnect grace period)
-			players = append(players, transport.SessionPlayer{PlayerID: id, DisplayName: m.DisplayName, Connected: true, Role: string(m.Role)})
+			players = append(players, transport.SessionPlayer{PlayerID: id, DisplayName: m.DisplayName, Connected: true})
 		}
 	}
 	view := transport.StateUpdate{

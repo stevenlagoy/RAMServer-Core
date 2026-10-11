@@ -145,7 +145,6 @@ The core and the game split responsibility:
 
 - `game_id` - the game to play: `"tictactoe"`, `"chess"`, or `"gofish"`. An unregistered value is rejected with `ERROR_CODE_UNKNOWN_GAME`.
 - `session_id` - when non-empty, requests a specific session (`ERROR_CODE_SESSION_NOT_FOUND` if it does not exist). When empty, asks the server to select or create a session according to the game's policy.
-- `requested_role` - optional. The game-defined role to join as, such as `"player"` or `"spectator"`. When empty, the server assigns the first role the game declares that still has room. A role the game does not declare is rejected with `ERROR_CODE_INVALID_ARGUMENT`; a declared role that is already at capacity is rejected with `ERROR_CODE_SESSION_NOT_JOINABLE`.
 - A player can be a member of only one session at a time. A join while already a member of a session is rejected with `ERROR_CODE_ALREADY_IN_SESSION`; leave first.
 - If the session cannot accept the player, for example because it has already started, has closed, or is full, the join is rejected with `ERROR_CODE_SESSION_NOT_JOINABLE`.
 - On success, the server broadcasts a `StateUpdate` to the session, including the new player. The requester's copy is its reply, and it carries the server-assigned `session_id`.
@@ -186,7 +185,7 @@ A rejected action leaves the session state unchanged and produces no `StateUpdat
 - `status` - the generic lifecycle state; see `SessionStatus` below. It does not by itself grant any player permission to act.
 - `players` - the current roster, as a list of `SessionPlayer`.
 - `state_version` - increases with every change to the session: membership, connection status, session status, or an applied action. A client can use this to detect and ignore a stale or duplicate broadcast, and passes it back as `ActionRequest.expected_state_version`.
-- `encoded_view` - opaque bytes: a per-recipient view of game-defined state. While waiting, it might hold an owner, vote totals, a countdown, or player-count limits; in progress, the board or hand. Because it is per-recipient, a game with hidden information, such as a Go Fish hand, sends each player only what they are allowed to see.
+- `encoded_view` - opaque bytes: a per-recipient view of game-defined state. While waiting, it might hold an owner, vote totals, a countdown, or player-count limits; in progress, the board or hand. Because it is per-recipient, a game with hidden information, such as a Go Fish hand, sends each player only what they are allowed to see. Game-specific roles, such as which side a player has in chess or whether they are X or O, are also part of the view; the core protocol has no role field.
 - `active_player_id` - whose turn it is now; empty when no player has the turn, such as while the session is waiting.
 - `player_order` - the full turn order; empty until the game sets one. Needed for games with more than two players, where "next turn" is not just "the other player."
 
@@ -195,7 +194,6 @@ A rejected action leaves the session state unchanged and produces no `StateUpdat
 - `player_id` - the player's server-issued identity.
 - `display_name` - the player's cosmetic label from `AuthRequest`.
 - `connected` - `false` while the player's connection is down and the server is waiting for them to resume; see **Disconnects** above.
-- `role` - the game-defined role this player holds in the session, such as `"player"` or `"spectator"`. A client finds its own role by matching its `player_id`. Roles are strings rather than an enum so that adding a game never requires a schema change; game-specific seats (such as white or black) belong in `encoded_view` unless the game declares them as roles.
 
 **`SessionStatus`**
 
@@ -225,14 +223,14 @@ Usable in any phase. When it answers a specific request, the envelope's `in_repl
 | `ERROR_CODE_AUTH_FAILED`              | 2   | Unknown `player_id`, or `reconnect_token` did not match.                                                  |
 | `ERROR_CODE_UNKNOWN_GAME`             | 3   | `game_id` has no registered game.                                                                         |
 | `ERROR_CODE_SESSION_NOT_FOUND`        | 4   | `session_id` does not exist.                                                                              |
-| `ERROR_CODE_SESSION_NOT_JOINABLE`     | 5   | The session refused a join: already started, closed, full, the requested role is full, or refused by the game's admission rules. |
+| `ERROR_CODE_SESSION_NOT_JOINABLE`     | 5   | The session refused a join: already started, closed, full, or refused by the game's admission rules.      |
 | `ERROR_CODE_OUT_OF_TURN`              | 6   | Action submitted by a player who is not `active_player_id`.                                               |
 | `ERROR_CODE_ILLEGAL_ACTION`           | 7   | Action refused by the game in the session's current phase.                                                |
 | `ERROR_CODE_MALFORMED_MESSAGE`        | 8   | An envelope, or an opaque action payload, could not be parsed.                                            |
 | `ERROR_CODE_INVALID_STATE`            | 9   | Message not valid in the connection's current phase, such as `JoinGameRequest` before `AuthResponse` or a second `ConnectRequest`. |
 | `ERROR_CODE_NOT_IN_SESSION`           | 10  | The session exists, but the sender is not a member of it.                                                 |
 | `ERROR_CODE_ALREADY_IN_SESSION`       | 11  | `JoinGameRequest` sent by a player who is already a member of a session.                                  |
-| `ERROR_CODE_INVALID_ARGUMENT`         | 12  | A field failed validation, such as an empty or overly long `display_name`, an empty `game_id`, or a `requested_role` the game does not declare. |
+| `ERROR_CODE_INVALID_ARGUMENT`         | 12  | A field failed validation, such as an empty or overly long `display_name` or an empty `game_id`.          |
 | `ERROR_CODE_STALE_STATE`              | 13  | `expected_state_version` did not match the session's current `state_version`.                            |
 | `ERROR_CODE_INTERNAL`                 | 14  | The server failed while handling an otherwise valid request. Session state is unchanged.                  |
 

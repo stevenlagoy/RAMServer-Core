@@ -23,7 +23,7 @@ Connected to 127.0.0.1:9000
 Type a command, or help for the list. Exit with Ctrl+C or EOF.
 create stub
 [2026-10-11 00:32:25] -> JOIN      sequence:3 join_session_request:{game_id:"stub"}
-[2026-10-11 00:32:25] <- STATE     in_reply_to:3 state_update:{session_id:"session-b3d4c64e..." game_id:"stub" status:SESSION_STATUS_WAITING players:{player_id:"69e0ff70..." display_name:"Alice" connected:true role:"player"}}
+[2026-10-11 00:32:25] <- STATE     in_reply_to:3 state_update:{session_id:"session-b3d4c64e..." game_id:"stub" status:SESSION_STATUS_WAITING players:{player_id:"69e0ff70..." display_name:"Alice" connected:true}}
 raw hello
 [2026-10-11 00:32:28] -> RAW       "hello"
 [2026-10-11 00:32:28] <- ERROR     error_response:{code:ERROR_CODE_MALFORMED_MESSAGE message:"proto: cannot parse invalid wire-format data"}
@@ -32,11 +32,11 @@ raw hello
 ## Commands
 
 | Command                                 | Sends                 | Note                                                                                     |
-|-----------------------------------------|-----------------------|------------------------------------------------------------------------------------------|
+| --------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------- |
 | `connect [protocol_version]`            | `ConnectRequest`      | Only needed with `-handshake=false`.                                                     |
 | `auth <display_name> [player_id token]` | `AuthRequest`         | Only needed with `-handshake=false`.                                                     |
-| `create <game_id> [role]`               | `JoinSessionRequest`  | Does not include `session_id`, so a new session will be created.                         |
-| `join <game_id> <session_id> [role]`    | `JoinSessionRequest`  | `session_id` should match an existing session.                                           |
+| `create <game_id>`                      | `JoinSessionRequest`  | Does not include `session_id`, so a new session will be created.                         |
+| `join <game_id> <session_id>`           | `JoinSessionRequest`  | `session_id` should match an existing session.                                           |
 | `leave [session_id]`                    | `LeaveSessionRequest` | Defaults to the current session.                                                         |
 | `action <payload>`                      | `ActionRequest`       | Targets the current session. The rest of the line is sent as the `encoded_action` bytes. |
 | `raw <text>`                            | arbitrary frame       | Sends the text as an arbitary frame, not protobuf. Useful for testing malformed input.   |

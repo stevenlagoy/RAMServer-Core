@@ -28,8 +28,8 @@ const (
 const helpText = `Commands:
   connect [protocol_version]               send ConnectRequest
   auth <display_name> [player_id token]    send AuthRequest
-  create <game_id> [role]                  create a session (JoinSessionRequest without session_id)
-  join <game_id> <session_id> [role]       join an existing session
+  create <game_id>                         create a session (JoinSessionRequest without session_id)
+  join <game_id> <session_id>              join an existing session
   leave [session_id]                       leave a session (default: current session)
   action <payload>                         send ActionRequest to the current session
   raw <text>                               send text as an arbitrary frame (not protobuf)
@@ -138,23 +138,20 @@ func parseCommand(line, currentSession string) (msg *pb.ClientMessage, raw []byt
 		}
 		return &pb.ClientMessage{Payload: &pb.ClientMessage_AuthRequest{AuthRequest: req}}, nil, nil
 	case "create":
-		if len(args) < 1 || len(args) > 2 {
-			return nil, nil, errors.New("usage: create <game_id> [role]")
+		if len(args) != 1 {
+			return nil, nil, errors.New("usage: create <game_id>")
 		}
-		req := &pb.JoinSessionRequest{GameId: args[0]}
-		if len(args) == 2 {
-			req.RequestedRole = args[1]
-		}
-		return &pb.ClientMessage{Payload: &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: req}}, nil, nil
+		return &pb.ClientMessage{Payload: &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{
+			GameId: args[0],
+		}}}, nil, nil
 	case "join":
-		if len(args) < 2 || len(args) > 3 {
-			return nil, nil, errors.New("usage: join <game_id> <session_id> [role]")
+		if len(args) != 2 {
+			return nil, nil, errors.New("usage: join <game_id> <session_id>")
 		}
-		req := &pb.JoinSessionRequest{GameId: args[0], SessionId: args[1]}
-		if len(args) == 3 {
-			req.RequestedRole = args[2]
-		}
-		return &pb.ClientMessage{Payload: &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: req}}, nil, nil
+		return &pb.ClientMessage{Payload: &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{
+			GameId:    args[0],
+			SessionId: args[1],
+		}}}, nil, nil
 	case "leave":
 		sessionID := currentSession
 		if len(args) > 0 {

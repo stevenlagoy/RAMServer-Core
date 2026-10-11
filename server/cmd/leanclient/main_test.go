@@ -51,14 +51,11 @@ func TestParseCommand(t *testing.T) {
 		}},
 		{"create stub", "", func(m *pb.ClientMessage) bool {
 			j := m.GetJoinSessionRequest()
-			return j.GetGameId() == "stub" && j.GetSessionId() == "" && j.GetRequestedRole() == ""
+			return j.GetGameId() == "stub" && j.GetSessionId() == ""
 		}},
-		{"create stub spectator", "", func(m *pb.ClientMessage) bool {
-			return m.GetJoinSessionRequest().GetRequestedRole() == "spectator"
-		}},
-		{"join stub s1 player", "", func(m *pb.ClientMessage) bool {
+		{"join stub s1", "", func(m *pb.ClientMessage) bool {
 			j := m.GetJoinSessionRequest()
-			return j.GetGameId() == "stub" && j.GetSessionId() == "s1" && j.GetRequestedRole() == "player"
+			return j.GetGameId() == "stub" && j.GetSessionId() == "s1"
 		}},
 		{"leave", "s1", func(m *pb.ClientMessage) bool { return m.GetLeaveSessionRequest().GetSessionId() == "s1" }},
 		{"leave s2", "s1", func(m *pb.ClientMessage) bool { return m.GetLeaveSessionRequest().GetSessionId() == "s2" }},
@@ -85,7 +82,7 @@ func TestParseCommandRaw(t *testing.T) {
 }
 
 func TestParseCommandErrors(t *testing.T) {
-	for _, line := range []string{"auth", "auth Alice p1", "create", "join stub", "leave", "action move", "action", "raw", "dance"} {
+	for _, line := range []string{"auth", "auth Alice p1", "create", "create stub extra", "join stub", "join stub s1 extra", "leave", "action move", "action", "raw", "dance"} {
 		if _, _, err := parseCommand(line, ""); err == nil {
 			t.Errorf("parseCommand(%q) succeeded with no session, want an error", line)
 		}

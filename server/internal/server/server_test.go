@@ -316,39 +316,6 @@ func TestJoinerAndCreatorBothReceiveStateUpdate(t *testing.T) {
 	}
 }
 
-func TestJoinReportsAssignedRole(t *testing.T) {
-	addr, stopServer := startTestServer(t, testConfig())
-	defer stopServer()
-	conn, r, _ := authenticate(t, addr, "Alice")
-
-	sendMessage(t, conn, &pb.ClientMessage{
-		Sequence: 3,
-		Payload:  &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{GameId: "stub"}},
-	})
-	players := expectMessage(t, conn, r).GetStateUpdate().GetPlayers()
-	if len(players) != 1 || players[0].GetRole() != "player" {
-		t.Fatalf("expected one player with role \"player\", got %v", players)
-	}
-}
-
-func TestJoinRejectsUnsupportedRequestedRole(t *testing.T) {
-	addr, stopServer := startTestServer(t, testConfig())
-	defer stopServer()
-	conn, r, _ := authenticate(t, addr, "Alice")
-
-	sendMessage(t, conn, &pb.ClientMessage{
-		Sequence: 3,
-		Payload: &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{
-			GameId:        "stub",
-			RequestedRole: "spectator", // the stub game only declares "player"
-		}},
-	})
-	resp := expectMessage(t, conn, r)
-	if resp.GetInReplyTo() != 3 || resp.GetErrorResponse().GetCode() != pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT {
-		t.Fatalf("expected ERROR_CODE_INVALID_ARGUMENT in reply to 3, got %v", resp)
-	}
-}
-
 func TestHandshakeIssuesUniqueIdentities(t *testing.T) {
 	addr, stopServer := startTestServer(t, testConfig())
 	defer stopServer()

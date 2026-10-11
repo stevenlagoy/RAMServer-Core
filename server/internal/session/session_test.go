@@ -35,16 +35,6 @@ func (f *fakeSender) next(t *testing.T) *pb.ServerMessage {
 	}
 }
 
-// twoSeatGame allows two players and any number of spectators
-type twoSeatGame struct{ game.StubGame }
-
-func (g *twoSeatGame) Roles() []game.RoleSpec {
-	return []game.RoleSpec{
-		{Name: game.RolePlayer, Min: 2, Max: 2},
-		{Name: game.RoleSpectator, Max: 0},
-	}
-}
-
 // oneSeatGame allows a single player and nothing else
 type oneSeatGame struct{ game.StubGame }
 
@@ -61,70 +51,14 @@ func startSession(t *testing.T, g game.Game) (*Session, context.Context) {
 	return s, ctx
 }
 
-func rolesIn(msg *pb.ServerMessage) map[string]string {
-	roles := make(map[string]string)
-	for _, p := range msg.GetStateUpdate().GetPlayers() {
-		roles[p.GetPlayerId()] = p.GetRole()
-	}
-	return roles
-}
-
-func TestJoinAssignsFirstRoleWithRoom(t *testing.T) {
-	s, ctx := startSession(t, &twoSeatGame{})
-	senders := map[string]*fakeSender{"a": newFakeSender(), "b": newFakeSender(), "c": newFakeSender()}
-	for i, id := range []string{"a", "b", "c"} {
-		if err := s.Join(ctx, id, "name-"+id, uint64(i+1), "", senders[id]); err != nil {
-			t.Fatalf("join %s: %v", id, err)
-		}
-	}
-	var last *pb.ServerMessage
-	for range 3 { // a sees all three broadcasts
-		last = senders["a"].next(t)
-	}
-	want := map[string]string{"a": "player", "b": "player", "c": "spectator"}
-	if got := rolesIn(last); len(got) != 3 || got["a"] != want["a"] || got["b"] != want["b"] || got["c"] != want["c"] {
-		t.Fatalf("roles = %v, want %v", got, want)
-	}
-}
-
-func TestJoinWithRequestedRole(t *testing.T) {
-	s, ctx := startSession(t, &twoSeatGame{})
-	a := newFakeSender()
-	if err := s.Join(ctx, "a", "", 1, game.RoleSpectator, a); err != nil {
-		t.Fatal(err)
-	}
-	if got := rolesIn(a.next(t))["a"]; got != "spectator" {
-		t.Fatalf("role = %q, want spectator", got)
-	}
-}
-
-func TestJoinRejectsUnknownRole(t *testing.T) {
-	s, ctx := startSession(t, &twoSeatGame{})
-	if err := s.Join(ctx, "a", "", 1, "dealer", newFakeSender()); !errors.Is(err, ErrUnknownRole) {
-		t.Fatalf("err = %v, want ErrUnknownRole", err)
-	}
-}
-
-func TestJoinRejectsFullRole(t *testing.T) {
-	s, ctx := startSession(t, &twoSeatGame{})
-	for _, id := range []string{"a", "b"} {
-		if err := s.Join(ctx, id, "name-"+id, 1, game.RolePlayer, newFakeSender()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := s.Join(ctx, "c", "", 1, game.RolePlayer, newFakeSender()); !errors.Is(err, ErrRoleFull) {
-		t.Fatalf("err = %v, want ErrRoleFull", err)
-	}
-}
-
 func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 	s, ctx := startSession(t, &oneSeatGame{})
 	a := newFakeSender()
-	if err := s.Join(ctx, "a", "", 1, "", a); err != nil {
+	if err := s.Join(ctx, "a", "", 1, a); err != nil {
 		t.Fatal(err)
 	}
 	a.next(t)
-	if err := s.Join(ctx, "b", "", 2, "", newFakeSender()); !errors.Is(err, ErrLobbyFull) {
+	if err := s.Join(ctx, "b", "", 2, newFakeSender()); !errors.Is(err, ErrLobbyFull) {
 		t.Fatalf("err = %v, want ErrLobbyFull", err)
 	}
 
@@ -143,7 +77,7 @@ func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
 	s, ctx := startSession(t, &game.StubGame{})
 	a := newFakeSender()
-	if err := s.Join(ctx, "a", "", 1, "", a); err != nil {
+	if err := s.Join(ctx, "a", "", 1, a); err != nil {
 		t.Fatal(err)
 	}
 	a.next(t)
@@ -152,18 +86,16 @@ func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
 		t.Fatalf("expected match to start, got %v", state)
 	}
 
-	err := s.Join(ctx, "b", "", 2, "", newFakeSender())
+	err := s.Join(ctx, "b", "", 2, newFakeSender())
 	var perr *transport.Error
 	if !errors.Is(err, ErrAlreadyStarted) || !errors.As(err, &perr) || perr.Code != transport.CodeSessionNotJoinable {
 		t.Fatalf("err = %v, want ErrAlreadyStarted with CodeSessionNotJoinable", err)
 	}
 }
 
-func TestFullLobbyAndRoleAreNotJoinable(t *testing.T) {
-	for _, err := range []error{ErrLobbyFull, ErrRoleFull} {
-		var perr *transport.Error
-		if !errors.As(err, &perr) || perr.Code != transport.CodeSessionNotJoinable {
-			t.Errorf("%v has code %v, want CodeSessionNotJoinable", err, perr)
-		}
+func TestFullLobbyIsNotJoinable(t *testing.T) {
+	var perr *transport.Error
+	if !errors.As(ErrLobbyFull, &perr) || perr.Code != transport.CodeSessionNotJoinable {
+		t.Fatalf("ErrLobbyFull has code %v, want CodeSessionNotJoinable", perr)
 	}
 }

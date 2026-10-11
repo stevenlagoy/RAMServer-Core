@@ -114,10 +114,9 @@ type ClientMessage struct {
 	PlayerID       string
 	ReconnectToken string
 
-	// KindJoinSession (GameID, SessionID, RequestedRole), KindLeaveSession and KindAction (SessionID)
-	GameID        string
-	SessionID     string
-	RequestedRole string
+	// KindJoinSession (GameID, SessionID), KindLeaveSession and KindAction (SessionID)
+	GameID    string
+	SessionID string
 
 	// KindAction. Action.ID is Sequence; ActorID is left for the caller to set
 	Action               game.Action
@@ -145,7 +144,6 @@ func DecodeClientMessage(frame []byte) (ClientMessage, error) {
 		msg.Kind = KindJoinSession
 		msg.GameID = p.JoinSessionRequest.GetGameId()
 		msg.SessionID = p.JoinSessionRequest.GetSessionId()
-		msg.RequestedRole = p.JoinSessionRequest.GetRequestedRole()
 	case *pb.ClientMessage_LeaveSessionRequest:
 		msg.Kind = KindLeaveSession
 		msg.SessionID = p.LeaveSessionRequest.GetSessionId()
@@ -197,7 +195,6 @@ type SessionPlayer struct {
 	PlayerID    string
 	DisplayName string
 	Connected   bool
-	Role        string
 }
 
 type MatchResult struct {
@@ -251,7 +248,7 @@ func EncodeLeaveSessionResponse(inReplyTo uint64, sessionID string) []byte {
 func EncodeStateUpdate(inReplyTo uint64, s StateUpdate) []byte {
 	players := make([]*pb.SessionPlayer, len(s.Players))
 	for i, p := range s.Players {
-		players[i] = &pb.SessionPlayer{PlayerId: p.PlayerID, DisplayName: p.DisplayName, Connected: p.Connected, Role: p.Role}
+		players[i] = &pb.SessionPlayer{PlayerId: p.PlayerID, DisplayName: p.DisplayName, Connected: p.Connected}
 	}
 	return marshal(&pb.ServerMessage{
 		InReplyTo: inReplyTo,

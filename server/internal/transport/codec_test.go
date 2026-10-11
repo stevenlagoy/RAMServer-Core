@@ -115,9 +115,8 @@ func TestDecodeJoinSessionRequest(t *testing.T) {
 	frame, err := proto.Marshal(&pb.ClientMessage{
 		Sequence: 2,
 		Payload: &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{
-			GameId:        "chess",
-			SessionId:     "s1",
-			RequestedRole: "spectator",
+			GameId:    "chess",
+			SessionId: "s1",
 		}},
 	})
 	if err != nil {
@@ -127,7 +126,7 @@ func TestDecodeJoinSessionRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if msg.Kind != KindJoinSession || msg.GameID != "chess" || msg.SessionID != "s1" || msg.RequestedRole != "spectator" {
+	if msg.Kind != KindJoinSession || msg.GameID != "chess" || msg.SessionID != "s1" {
 		t.Fatalf("unexpected decode: %+v", msg)
 	}
 }
@@ -138,8 +137,8 @@ func TestEncodeStateUpdate(t *testing.T) {
 		GameID:    "chess",
 		Status:    StatusInProgress,
 		Players: []SessionPlayer{
-			{PlayerID: "p1", DisplayName: "Alice", Connected: true, Role: "player"},
-			{PlayerID: "p2", DisplayName: "Bob", Role: "spectator"},
+			{PlayerID: "p1", DisplayName: "Alice", Connected: true},
+			{PlayerID: "p2", DisplayName: "Bob"},
 		},
 		StateVersion:   7,
 		EncodedView:    []byte("board"),
@@ -157,10 +156,10 @@ func TestEncodeStateUpdate(t *testing.T) {
 	if len(players) != 2 {
 		t.Fatalf("expected 2 players, got %v", players)
 	}
-	if p := players[0]; p.GetPlayerId() != "p1" || p.GetDisplayName() != "Alice" || !p.GetConnected() || p.GetRole() != "player" {
+	if p := players[0]; p.GetPlayerId() != "p1" || p.GetDisplayName() != "Alice" || !p.GetConnected() {
 		t.Fatalf("unexpected first player: %v", p)
 	}
-	if p := players[1]; p.GetPlayerId() != "p2" || p.GetConnected() || p.GetRole() != "spectator" {
+	if p := players[1]; p.GetPlayerId() != "p2" || p.GetDisplayName() != "Bob" || p.GetConnected() {
 		t.Fatalf("unexpected second player: %v", p)
 	}
 }
