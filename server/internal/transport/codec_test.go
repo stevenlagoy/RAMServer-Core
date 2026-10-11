@@ -109,3 +109,44 @@ func TestCompatibleVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeJoinSessionRequest(t *testing.T) {
+	frame, err := proto.Marshal(&pb.ClientMessage{
+		Sequence: 2,
+		Payload: &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{
+			GameId:        "chess",
+			SessionId:     "s1",
+			RequestedRole: "spectator",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := DecodeClientMessage(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Kind != KindJoinSession || msg.GameID != "chess" || msg.SessionID != "s1" || msg.RequestedRole != "spectator" {
+		t.Fatalf("unexpected decode: %+v", msg)
+	}
+}
+
+func TestEncodeStateUpdatePlayerRoles(t *testing.T) {
+	frame := EncodeStateUpdate(3, StateUpdate{
+		SessionID: "s1",
+		Players: []SessionPlayer{
+			{PlayerID: "p1", DisplayName: "Alice", Connected: true, Role: "player"},
+			{PlayerID: "p2", DisplayName: "Bob", Role: "spectator"},
+		},
+	})
+	players := decodeServerMessage(t, frame).GetStateUpdate().GetPlayers()
+	if len(players) != 2 {
+		t.Fatalf("expected 2 players, got %v", players)
+	}
+	if p := players[0]; p.GetPlayerId() != "p1" || p.GetDisplayName() != "Alice" || !p.GetConnected() || p.GetRole() != "player" {
+		t.Fatalf("unexpected first player: %v", p)
+	}
+	if p := players[1]; p.GetPlayerId() != "p2" || p.GetConnected() || p.GetRole() != "spectator" {
+		t.Fatalf("unexpected second player: %v", p)
+	}
+}

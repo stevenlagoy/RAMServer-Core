@@ -247,7 +247,7 @@ func (c *Client) handleJoinSession(ctx context.Context, msg transport.ClientMess
 			return
 		}
 		// Joining like any other member assigns a role and replies with the creator's StateUpdate
-		if err := s.Join(ctx, c.ID, msg.Sequence, c); err != nil {
+		if err := s.Join(ctx, c.ID, msg.Sequence, game.Role(msg.RequestedRole), c); err != nil {
 			c.sessions.Remove(s.ID) // never had a member
 			c.Send(transport.EncodeError(msg.Sequence, err))
 			return
@@ -261,7 +261,7 @@ func (c *Client) handleJoinSession(ctx context.Context, msg transport.ClientMess
 		c.Send(transport.EncodeError(msg.Sequence, errSessionNotFound))
 		return
 	}
-	if err := s.Join(ctx, c.ID, msg.Sequence, c); err != nil {
+	if err := s.Join(ctx, c.ID, msg.Sequence, game.Role(msg.RequestedRole), c); err != nil {
 		c.Send(transport.EncodeError(msg.Sequence, err))
 		return
 	}

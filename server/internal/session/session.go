@@ -79,7 +79,8 @@ type sessionMsg struct {
 
 type joinMsg struct {
 	clientID string
-	seq      uint64 // request sequence, echoed on the joiner's StateUpdate
+	seq      uint64    // request sequence, echoed on the joiner's StateUpdate
+	role     game.Role // requested role; "" lets the session assign one
 	sender   Sender
 	reply    chan error
 }
@@ -98,16 +99,21 @@ type legalMovesMsg struct {
 var (
 	// Returned by Join when game's role limits have no room for participant
 	ErrLobbyFull = transport.WrapError(transport.CodeSessionNotJoinable, errors.New("lobby is full"))
+	// Returned by Join when the requested role is at capacity
+	ErrRoleFull = transport.WrapError(transport.CodeSessionNotJoinable, errors.New("requested role is full"))
+	// Returned by Join when the game does not declare the requested role
+	ErrUnknownRole = transport.WrapError(transport.CodeInvalidArgument, errors.New("game does not support the requested role"))
 	// Returned by Join when a match is already in progress and game does not allow joining mid-match
 	ErrAlreadyStarted = transport.WrapError(transport.CodeSessionNotJoinable, errors.New("match already in progress"))
 )
 
 // Adds clientID to the lobby, blocking until Run processes the request or ctx is cancelled.
 // seq is the JoinSessionRequest's sequence; the joiner's copy of the resulting StateUpdate replies to it.
-func (s *Session) Join(ctx context.Context, clientID string, seq uint64, sender Sender) error {
+// role is the requested role, or "" to let the session assign the first role with room.
+func (s *Session) Join(ctx context.Context, clientID string, seq uint64, role game.Role, sender Sender) error {
 	reply := make(chan error, 1)
 	select {
-	case s.inbox <- sessionMsg{join: &joinMsg{clientID: clientID, seq: seq, sender: sender, reply: reply}}:
+	case s.inbox <- sessionMsg{join: &joinMsg{clientID: clientID, seq: seq, role: role, sender: sender, reply: reply}}:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -197,32 +203,41 @@ func (s *Session) handleJoin(j *joinMsg) {
 		j.reply <- ErrAlreadyStarted
 		return
 	}
-	if _, exists := s.members[j.clientID]; !exists {
-		s.order = append(s.order, j.clientID)
-	}
-	role := s.assignRole()
-	if role == "" {
-		j.reply <- ErrLobbyFull
+	role, err := s.assignRole(j.role)
+	if err != nil {
+		j.reply <- err
 		return
+	}
+	if _, exists := s.members[j.clientID]; !exists {
+		s.order = append(s.order, j.clientID) // only after the join is accepted, so a rejected joiner never gets a turn
 	}
 	s.members[j.clientID] = &Member{ClientID: j.clientID, Sender: j.sender, Role: role}
 	j.reply <- nil
 	s.broadcastState(j.clientID, j.seq)
 }
 
-// Picks a role for a newly joining member. Returns "" if every role is at capacity.
-func (s *Session) assignRole() game.Role {
-	// TODO: allow clients to explicitly request roles
+// Picks a role for a newly joining member: requested if non-empty, otherwise the first
+// declared role with room
+func (s *Session) assignRole(requested game.Role) (game.Role, error) {
 	counts := make(map[game.Role]int)
 	for _, m := range s.members {
 		counts[m.Role]++
 	}
 	for _, spec := range s.Game.Roles() {
-		if spec.Max == 0 || counts[spec.Name] < spec.Max {
-			return spec.Name
+		hasRoom := spec.Max == 0 || counts[spec.Name] < spec.Max
+		switch {
+		case requested == "" && hasRoom:
+			return spec.Name, nil
+		case spec.Name == requested && hasRoom:
+			return spec.Name, nil
+		case spec.Name == requested:
+			return "", ErrRoleFull
 		}
 	}
-	return ""
+	if requested != "" {
+		return "", ErrUnknownRole
+	}
+	return "", ErrLobbyFull
 }
 
 func (s *Session) handleLeave(l *leaveMsg) {
@@ -320,9 +335,9 @@ func (s *Session) handleLegalMoves(l *legalMovesMsg) {
 func (s *Session) viewFor(memberID string) transport.StateUpdate {
 	players := make([]transport.SessionPlayer, 0, len(s.order))
 	for _, id := range s.order {
-		if _, ok := s.members[id]; ok {
+		if m, ok := s.members[id]; ok {
 			// TODO: carry display names and connection status on Member
-			players = append(players, transport.SessionPlayer{PlayerID: id, Connected: true})
+			players = append(players, transport.SessionPlayer{PlayerID: id, Connected: true, Role: string(m.Role)})
 		}
 	}
 	view := transport.StateUpdate{
