@@ -241,7 +241,7 @@ func (s *Session) handleLeave(l *leaveMsg) {
 	if len(s.members) == 0 {
 		return // caller removes Session from store
 	}
-	s.broadcastState("", 0)
+	s.broadcastUnsolicitedState()
 }
 
 func (s *Session) handleSetReady(r *setReadyMsg) {
@@ -254,7 +254,7 @@ func (s *Session) handleSetReady(r *setReadyMsg) {
 		s.startMatch()
 		return
 	}
-	s.broadcastState("", 0)
+	s.broadcastUnsolicitedState()
 }
 
 func (s *Session) readyToStart() bool {
@@ -273,7 +273,7 @@ func (s *Session) startMatch() {
 		roles[id] = m.Role
 	}
 	s.current = match.NewMatch(s.Game, append([]string(nil), s.order...), roles) // copy order
-	s.broadcastState("", 0)
+	s.broadcastUnsolicitedState()
 }
 
 func (s *Session) handleSubmit(action game.Action) {
@@ -342,6 +342,11 @@ func (s *Session) viewFor(memberID string) transport.StateUpdate {
 		}
 	}
 	return view
+}
+
+// Sends each member its StateUpdate for a change no client requested, so no copy sets in_reply_to
+func (s *Session) broadcastUnsolicitedState() {
+	s.broadcastState("", 0)
 }
 
 // Sends each member its StateUpdate. requesterID's copy replies to seq; all others are unsolicited
