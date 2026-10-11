@@ -8,3 +8,4 @@ CONTRIBUTING.md
 *.md
 *.db
 data/
+server/gen
