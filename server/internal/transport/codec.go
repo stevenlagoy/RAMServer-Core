@@ -47,27 +47,27 @@ const (
 )
 
 // Protocol-level failure, reported to the client as an ErrorResponse
-type Error struct {
+type ProtocolError struct {
 	Code      ErrorCode
 	Message   string
 	SessionID string
 	Err       error
 }
 
-func NewError(code ErrorCode, format string, args ...any) *Error {
-	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
+func NewError(code ErrorCode, format string, args ...any) *ProtocolError {
+	return &ProtocolError{Code: code, Message: fmt.Sprintf(format, args...)}
 }
 
 // Wraps err with a protocol error code, keeping err's text as the message
-func WrapError(code ErrorCode, err error) *Error {
-	return &Error{Code: code, Message: err.Error(), Err: err}
+func WrapError(code ErrorCode, err error) *ProtocolError {
+	return &ProtocolError{Code: code, Message: err.Error(), Err: err}
 }
 
-func (e *Error) Error() string {
+func (e *ProtocolError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
-func (e *Error) Unwrap() error { return e.Err }
+func (e *ProtocolError) Unwrap() error { return e.Err }
 
 // --- Decoding ---
 
@@ -288,7 +288,7 @@ func EncodeMatchResult(m MatchResult) []byte {
 
 func EncodeError(inReplyTo uint64, err error) []byte {
 	resp := &pb.ErrorResponse{Code: CodeInternal, Message: err.Error()}
-	var perr *Error
+	var perr *ProtocolError
 	if errors.As(err, &perr) {
 		resp.Code = perr.Code
 		resp.Message = perr.Message

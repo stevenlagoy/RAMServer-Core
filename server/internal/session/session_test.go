@@ -87,14 +87,14 @@ func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
 	}
 
 	err := s.Join(ctx, "b", "", 2, newFakeSender())
-	var perr *transport.Error
+	var perr *transport.ProtocolError
 	if !errors.Is(err, ErrAlreadyStarted) || !errors.As(err, &perr) || perr.Code != transport.CodeSessionNotJoinable {
 		t.Fatalf("err = %v, want ErrAlreadyStarted with CodeSessionNotJoinable", err)
 	}
 }
 
 func TestFullLobbyIsNotJoinable(t *testing.T) {
-	var perr *transport.Error
+	var perr *transport.ProtocolError
 	if !errors.As(ErrLobbyFull, &perr) || perr.Code != transport.CodeSessionNotJoinable {
 		t.Fatalf("ErrLobbyFull has code %v, want CodeSessionNotJoinable", perr)
 	}

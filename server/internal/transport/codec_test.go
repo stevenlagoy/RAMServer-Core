@@ -61,7 +61,7 @@ func TestDecodeClientMessage(t *testing.T) {
 func TestDecodeClientMessageMalformed(t *testing.T) {
 	assertMalformed := func(t *testing.T, err error) {
 		t.Helper()
-		var perr *Error
+		var perr *ProtocolError
 		if !errors.As(err, &perr) || perr.Code != CodeMalformedMessage {
 			t.Fatalf("expected CodeMalformedMessage, got %v", err)
 		}
