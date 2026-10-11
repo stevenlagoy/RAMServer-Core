@@ -122,7 +122,7 @@ func (s *Session) Join(ctx context.Context, clientID, displayName string, seq ui
 	}
 }
 
-// Removes clientID from the lobby. Does not remove an empties Session; caller is reponsible for this
+// Removes clientID from the lobby. Does not remove an empty Session; caller is reponsible for this
 func (s *Session) Leave(ctx context.Context, clientID string) {
 	select {
 	case s.inbox <- sessionMsg{leave: &leaveMsg{clientID: clientID}}:
