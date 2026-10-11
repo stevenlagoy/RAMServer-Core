@@ -31,16 +31,16 @@ raw hello
 
 ## Commands
 
-| Command | Sends |
-| ------- | ----- |
-| `connect [protocol_version]` | `ConnectRequest`. Only needed with `-handshake=false`. |
-| `auth <display_name> [player_id token]` | `AuthRequest`. Only needed with `-handshake=false`. |
-| `create <game_id> [role]` | `JoinSessionRequest` with no `session_id`, which creates a session. |
-| `join <game_id> <session_id> [role]` | `JoinSessionRequest` for an existing session. |
-| `leave [session_id]` | `LeaveSessionRequest`. Defaults to the current session. |
-| `action <payload>` | `ActionRequest` to the current session. The rest of the line is sent as the `encoded_action` bytes. |
-| `raw <text>` | The text as an arbitrary frame, not protobuf. Useful for testing malformed input. |
-| `help` | Lists the commands. |
+| Command                                 | Sends                 | Note                                                                                     |
+|-----------------------------------------|-----------------------|------------------------------------------------------------------------------------------|
+| `connect [protocol_version]`            | `ConnectRequest`      | Only needed with `-handshake=false`.                                                     |
+| `auth <display_name> [player_id token]` | `AuthRequest`         | Only needed with `-handshake=false`.                                                     |
+| `create <game_id> [role]`               | `JoinSessionRequest`  | Does not include `session_id`, so a new session will be created.                         |
+| `join <game_id> <session_id> [role]`    | `JoinSessionRequest`  | `session_id` should match an existing session.                                           |
+| `leave [session_id]`                    | `LeaveSessionRequest` | Defaults to the current session.                                                         |
+| `action <payload>`                      | `ActionRequest`       | Targets the current session. The rest of the line is sent as the `encoded_action` bytes. |
+| `raw <text>`                            | arbitrary frame       | Sends the text as an arbitary frame, not protobuf. Useful for testing malformed input.   |
+| `help`                                  | n/a                   | Lists the commands.                                                                      |
 
 The client numbers each message's `sequence` automatically. It remembers the current session from the last `StateUpdate` it received, and forgets it after a `LeaveSessionResponse`.
 
