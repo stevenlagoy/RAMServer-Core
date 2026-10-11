@@ -18,23 +18,21 @@ func NewSessionStore() *SessionStore {
 	return &SessionStore{sessions: make(map[string]*Session)}
 }
 
-// Starts a new Session for g under gameName, owned by ownerID, and runs it until
-// ctx is canelled or the store's Remove is called. Caller must ensure id is unique.
+// Starts a new, empty Session for g under gameName and runs it until ctx is
+// cancelled. The creator must Join it. Caller must ensure id is unique.
 func (st *SessionStore) Create(
 	ctx context.Context,
 	id,
 	gameName string,
 	g game.Game,
 	public bool,
-	ownerID string,
-	owner Sender,
 ) (*Session, error) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if _, exists := st.sessions[id]; exists {
 		return nil, fmt.Errorf("session: id %q already in use", id)
 	}
-	s := NewSession(id, gameName, g, public, ownerID, owner)
+	s := NewSession(id, gameName, g, public)
 	st.sessions[id] = s
 	go s.Run(ctx)
 	return s, nil

@@ -48,16 +48,15 @@ type Session struct {
 	current *match.Match
 }
 
-// Creates a Session with owner as its first member
-func NewSession(id, gameName string, g game.Game, public bool, ownerID string, owner Sender) *Session {
+// Creates an empty Session; its creator joins through Join like any other member
+func NewSession(id, gameName string, g game.Game, public bool) *Session {
 	return &Session{
 		ID:       id,
 		GameName: gameName,
 		Game:     g,
 		Public:   public,
 		inbox:    make(chan sessionMsg),
-		order:    []string{ownerID},
-		members:  map[string]*Member{ownerID: {ClientID: ownerID, Sender: owner}},
+		members:  make(map[string]*Member),
 	}
 }
 

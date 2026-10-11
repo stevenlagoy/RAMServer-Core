@@ -179,3 +179,108 @@ func TestIPLimiterDoesNotLeakEntries(t *testing.T) {
 		t.Fatalf("expected no leftover entries after all releases, got %d", len(l.counts))
 	}
 }
+
+// sendMessage marshals msg and writes it as one frame
+func sendMessage(t *testing.T, conn net.Conn, msg *pb.ClientMessage) {
+	t.Helper()
+	frame, err := proto.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := transport.WriteFrame(conn, frame); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// expectMessage reads the next non-heartbeat frame as a ServerMessage, failing after one second
+func expectMessage(t *testing.T, conn net.Conn, r *bufio.Reader) *pb.ServerMessage {
+	t.Helper()
+	conn.SetReadDeadline(time.Now().Add(time.Second))
+	frame, err := readNonHeartbeatFrame(t, conn, r)
+	if err != nil {
+		t.Fatalf("expected a response frame: %v", err)
+	}
+	var msg pb.ServerMessage
+	if err := proto.Unmarshal(frame, &msg); err != nil {
+		t.Fatalf("response is not a ServerMessage: %v", err)
+	}
+	return &msg
+}
+
+// authenticate dials addr and completes Connect and Auth, returning the connection, its reader, and the issued player_id
+func authenticate(t *testing.T, addr, displayName string) (net.Conn, *bufio.Reader, string) {
+	t.Helper()
+	conn := dialTestClient(t, addr)
+	r := bufio.NewReader(conn)
+	sendMessage(t, conn, &pb.ClientMessage{
+		Sequence: 1,
+		Payload:  &pb.ClientMessage_ConnectRequest{ConnectRequest: &pb.ConnectRequest{ProtocolVersion: transport.ProtocolVersion}},
+	})
+	if resp := expectMessage(t, conn, r); resp.GetConnectResponse() == nil {
+		t.Fatalf("expected ConnectResponse, got %v", resp)
+	}
+	sendMessage(t, conn, &pb.ClientMessage{
+		Sequence: 2,
+		Payload:  &pb.ClientMessage_AuthRequest{AuthRequest: &pb.AuthRequest{DisplayName: displayName}},
+	})
+	resp := expectMessage(t, conn, r)
+	if resp.GetAuthResponse() == nil {
+		t.Fatalf("expected AuthResponse, got %v", resp)
+	}
+	return conn, r, resp.GetAuthResponse().GetPlayerId()
+}
+
+func TestCreatorReceivesStateUpdate(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	conn, r, playerID := authenticate(t, addr, "Alice")
+
+	sendMessage(t, conn, &pb.ClientMessage{
+		Sequence: 5,
+		Payload:  &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{GameId: "stub"}},
+	})
+	resp := expectMessage(t, conn, r)
+	state := resp.GetStateUpdate()
+	if state == nil || resp.GetInReplyTo() != 5 {
+		t.Fatalf("expected StateUpdate in reply to 5, got %v", resp)
+	}
+	if state.GetSessionId() == "" || state.GetGameId() != "stub" || state.GetStatus() != pb.SessionStatus_SESSION_STATUS_WAITING {
+		t.Fatalf("unexpected session fields: %v", state)
+	}
+	if players := state.GetPlayers(); len(players) != 1 || players[0].GetPlayerId() != playerID {
+		t.Fatalf("expected creator %q as the only player, got %v", playerID, players)
+	}
+}
+
+func TestJoinerAndCreatorBothReceiveStateUpdate(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, aliceID := authenticate(t, addr, "Alice")
+	bob, bobR, bobID := authenticate(t, addr, "Bob")
+
+	sendMessage(t, alice, &pb.ClientMessage{
+		Sequence: 3,
+		Payload:  &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{GameId: "stub"}},
+	})
+	sessionID := expectMessage(t, alice, aliceR).GetStateUpdate().GetSessionId()
+
+	sendMessage(t, bob, &pb.ClientMessage{
+		Sequence: 9,
+		Payload:  &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{GameId: "stub", SessionId: sessionID}},
+	})
+	bobResp := expectMessage(t, bob, bobR)
+	aliceResp := expectMessage(t, alice, aliceR)
+
+	if bobResp.GetInReplyTo() != 9 {
+		t.Fatalf("joiner's StateUpdate should reply to 9, got %v", bobResp)
+	}
+	if aliceResp.GetInReplyTo() != 0 {
+		t.Fatalf("creator's copy should be unsolicited, got %v", aliceResp)
+	}
+	for _, resp := range []*pb.ServerMessage{bobResp, aliceResp} {
+		players := resp.GetStateUpdate().GetPlayers()
+		if len(players) != 2 || players[0].GetPlayerId() != aliceID || players[1].GetPlayerId() != bobID {
+			t.Fatalf("expected players [%s %s] in join order, got %v", aliceID, bobID, players)
+		}
+	}
+}
