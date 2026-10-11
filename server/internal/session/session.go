@@ -18,10 +18,11 @@ type Sender interface {
 
 // Once client's participation in a Session's lobby.
 type Member struct {
-	ClientID string
-	Sender   Sender
-	Role     game.Role
-	Ready    bool
+	ClientID    string
+	DisplayName string // cosmetic label from AuthRequest
+	Sender      Sender
+	Role        game.Role
+	Ready       bool
 }
 
 // One completed round for Session history and leaderboards
@@ -78,11 +79,12 @@ type sessionMsg struct {
 }
 
 type joinMsg struct {
-	clientID string
-	seq      uint64    // request sequence, echoed on the joiner's StateUpdate
-	role     game.Role // requested role; "" lets the session assign one
-	sender   Sender
-	reply    chan error
+	clientID    string
+	displayName string
+	seq         uint64    // request sequence, echoed on the joiner's StateUpdate
+	role        game.Role // requested role; "" lets the session assign one
+	sender      Sender
+	reply       chan error
 }
 type leaveMsg struct {
 	clientID string
@@ -108,12 +110,13 @@ var (
 )
 
 // Adds clientID to the lobby, blocking until Run processes the request or ctx is cancelled.
+// displayName is shown to other members in StateUpdate rosters; it is never used as identity.
 // seq is the JoinSessionRequest's sequence; the joiner's copy of the resulting StateUpdate replies to it.
 // role is the requested role, or "" to let the session assign the first role with room.
-func (s *Session) Join(ctx context.Context, clientID string, seq uint64, role game.Role, sender Sender) error {
+func (s *Session) Join(ctx context.Context, clientID, displayName string, seq uint64, role game.Role, sender Sender) error {
 	reply := make(chan error, 1)
 	select {
-	case s.inbox <- sessionMsg{join: &joinMsg{clientID: clientID, seq: seq, role: role, sender: sender, reply: reply}}:
+	case s.inbox <- sessionMsg{join: &joinMsg{clientID: clientID, displayName: displayName, seq: seq, role: role, sender: sender, reply: reply}}:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -211,7 +214,7 @@ func (s *Session) handleJoin(j *joinMsg) {
 	if _, exists := s.members[j.clientID]; !exists {
 		s.order = append(s.order, j.clientID) // only after the join is accepted, so a rejected joiner never gets a turn
 	}
-	s.members[j.clientID] = &Member{ClientID: j.clientID, Sender: j.sender, Role: role}
+	s.members[j.clientID] = &Member{ClientID: j.clientID, DisplayName: j.displayName, Sender: j.sender, Role: role}
 	j.reply <- nil
 	s.broadcastState(j.clientID, j.seq)
 }
@@ -336,8 +339,8 @@ func (s *Session) viewFor(memberID string) transport.StateUpdate {
 	players := make([]transport.SessionPlayer, 0, len(s.order))
 	for _, id := range s.order {
 		if m, ok := s.members[id]; ok {
-			// TODO: carry display names and connection status on Member
-			players = append(players, transport.SessionPlayer{PlayerID: id, Connected: true, Role: string(m.Role)})
+			// TODO: track connection status on Member once disconnects keep members (reconnect grace period)
+			players = append(players, transport.SessionPlayer{PlayerID: id, DisplayName: m.DisplayName, Connected: true, Role: string(m.Role)})
 		}
 	}
 	view := transport.StateUpdate{

@@ -282,6 +282,9 @@ func TestJoinerAndCreatorBothReceiveStateUpdate(t *testing.T) {
 		if len(players) != 2 || players[0].GetPlayerId() != aliceID || players[1].GetPlayerId() != bobID {
 			t.Fatalf("expected players [%s %s] in join order, got %v", aliceID, bobID, players)
 		}
+		if players[0].GetDisplayName() != "Alice" || players[1].GetDisplayName() != "Bob" {
+			t.Fatalf("expected display names [Alice Bob], got %v", players)
+		}
 	}
 }
 

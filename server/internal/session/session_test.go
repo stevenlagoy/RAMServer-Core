@@ -72,7 +72,7 @@ func TestJoinAssignsFirstRoleWithRoom(t *testing.T) {
 	s, ctx := startSession(t, &twoSeatGame{})
 	senders := map[string]*fakeSender{"a": newFakeSender(), "b": newFakeSender(), "c": newFakeSender()}
 	for i, id := range []string{"a", "b", "c"} {
-		if err := s.Join(ctx, id, uint64(i+1), "", senders[id]); err != nil {
+		if err := s.Join(ctx, id, "name-"+id, uint64(i+1), "", senders[id]); err != nil {
 			t.Fatalf("join %s: %v", id, err)
 		}
 	}
@@ -89,7 +89,7 @@ func TestJoinAssignsFirstRoleWithRoom(t *testing.T) {
 func TestJoinWithRequestedRole(t *testing.T) {
 	s, ctx := startSession(t, &twoSeatGame{})
 	a := newFakeSender()
-	if err := s.Join(ctx, "a", 1, game.RoleSpectator, a); err != nil {
+	if err := s.Join(ctx, "a", "", 1, game.RoleSpectator, a); err != nil {
 		t.Fatal(err)
 	}
 	if got := rolesIn(a.next(t))["a"]; got != "spectator" {
@@ -99,7 +99,7 @@ func TestJoinWithRequestedRole(t *testing.T) {
 
 func TestJoinRejectsUnknownRole(t *testing.T) {
 	s, ctx := startSession(t, &twoSeatGame{})
-	if err := s.Join(ctx, "a", 1, "dealer", newFakeSender()); !errors.Is(err, ErrUnknownRole) {
+	if err := s.Join(ctx, "a", "", 1, "dealer", newFakeSender()); !errors.Is(err, ErrUnknownRole) {
 		t.Fatalf("err = %v, want ErrUnknownRole", err)
 	}
 }
@@ -107,11 +107,11 @@ func TestJoinRejectsUnknownRole(t *testing.T) {
 func TestJoinRejectsFullRole(t *testing.T) {
 	s, ctx := startSession(t, &twoSeatGame{})
 	for _, id := range []string{"a", "b"} {
-		if err := s.Join(ctx, id, 1, game.RolePlayer, newFakeSender()); err != nil {
+		if err := s.Join(ctx, id, "name-"+id, 1, game.RolePlayer, newFakeSender()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.Join(ctx, "c", 1, game.RolePlayer, newFakeSender()); !errors.Is(err, ErrRoleFull) {
+	if err := s.Join(ctx, "c", "", 1, game.RolePlayer, newFakeSender()); !errors.Is(err, ErrRoleFull) {
 		t.Fatalf("err = %v, want ErrRoleFull", err)
 	}
 }
@@ -119,11 +119,11 @@ func TestJoinRejectsFullRole(t *testing.T) {
 func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 	s, ctx := startSession(t, &oneSeatGame{})
 	a := newFakeSender()
-	if err := s.Join(ctx, "a", 1, "", a); err != nil {
+	if err := s.Join(ctx, "a", "", 1, "", a); err != nil {
 		t.Fatal(err)
 	}
 	a.next(t)
-	if err := s.Join(ctx, "b", 2, "", newFakeSender()); !errors.Is(err, ErrLobbyFull) {
+	if err := s.Join(ctx, "b", "", 2, "", newFakeSender()); !errors.Is(err, ErrLobbyFull) {
 		t.Fatalf("err = %v, want ErrLobbyFull", err)
 	}
 
