@@ -64,12 +64,13 @@ const (
 // Decoded post-handshake frame
 // TODO: These are just guesses at what CreateLobby/JoinLobby/etc will need. Replace these based on protocol
 type ClientMessage struct {
-	Kind      ClientMessageKind
-	GameName  string      // CreateLobby
-	Public    bool        // CreateLobby
-	SessionID string      // JoinLobby
-	Ready     bool        // SetReady
-	Action    game.Action // SubmitAction
+	Kind             ClientMessageKind
+	GameName         string      // CreateLobby
+	Public           bool        // CreateLobby
+	SessionID        string      // JoinLobby
+	Ready            bool        // SetReady
+	Action           game.Action // SubmitAction
+	ExpectedStateVer uint64
 }
 
 // TODO: distinguish message based on protocol schema

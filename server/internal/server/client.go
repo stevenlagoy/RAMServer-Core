@@ -177,7 +177,13 @@ func (c *Client) dispatch(ctx context.Context, frame []byte) {
 		}
 		action := msg.Action
 		action.ActorID = c.ID // Don't trust IDs claimed by frame
-		c.session.Submit(ctx, action)
+		c.session.Submit(
+			ctx,
+			action,
+			msg.SessionID,
+			msg.ExpectedStateVer,
+			c,
+		)
 	case transport.KindRequestLegalMoves:
 		if c.session != nil {
 			c.Send(transport.EncodeLegalMoves(c.session.LegalMoves(ctx, c.ID)))

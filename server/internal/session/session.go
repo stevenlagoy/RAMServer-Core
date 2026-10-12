@@ -74,15 +74,15 @@ type sessionMsg struct {
 	join       *joinMsg
 	leave      *leaveMsg
 	setReady   *setReadyMsg
-	submit     *game.Action
+	submit     *submitMsg
 	legalMoves *legalMovesMsg
 }
 
 type submitMsg struct {
-	action			 game.Action
-	sessionID		 string
+	action           game.Action
+	sessionID        string
 	expectedStateVer uint64
-	sender 			 Sender
+	sender           Sender
 }
 type joinMsg struct {
 	clientID string
@@ -141,9 +141,21 @@ func (s *Session) SetReady(ctx context.Context, clientID string, ready bool) {
 }
 
 // Enqueues action for processing. action.ActorID must be set to authenticated client's ID by caller
-func (s *Session) Submit(ctx context.Context, action game.Action) {
+func (s *Session) Submit(
+	ctx context.Context,
+	action game.Action,
+	sessionID string,
+	expectedStateVer uint64,
+	sender Sender,
+) {
+	request := &submitMsg{
+		action:           action,
+		sessionID:        sessionID,
+		expectedStateVer: expectedStateVer,
+		sender:           sender,
+	}
 	select {
-	case s.inbox <- sessionMsg{submit: &action}:
+	case s.inbox <- sessionMsg{submit: request}:
 	case <-ctx.Done():
 	}
 }
@@ -190,7 +202,7 @@ func (s *Session) handle(msg sessionMsg) {
 	case msg.setReady != nil:
 		s.handleSetReady(msg.setReady)
 	case msg.submit != nil:
-		s.handleSubmit(*msg.submit)
+		s.handleSubmit(msg.submit.action)
 	case msg.legalMoves != nil:
 		s.handleLegalMoves(msg.legalMoves)
 	}
