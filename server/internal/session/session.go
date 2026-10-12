@@ -78,6 +78,12 @@ type sessionMsg struct {
 	legalMoves *legalMovesMsg
 }
 
+type submitMsg struct {
+	action			 game.Action
+	sessionID		 string
+	expectedStateVer uint64
+	sender 			 Sender
+}
 type joinMsg struct {
 	clientID string
 	sender   Sender
