@@ -32,7 +32,7 @@ func dialTestClient(t *testing.T, addr string) net.Conn {
 	t.Helper()
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		t.Fatalf("dial %s: %v", addr, err)
+		t.Fatalf("failed to dial %s: %v", addr, err)
 	}
 	t.Cleanup(func() { conn.Close() })
 	return conn
@@ -61,8 +61,9 @@ func startTestServer(t *testing.T, cfg ServerConfig) (string, func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0") // port 0: OS picks a free port, so tests don't collide
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("failed to start test listener: %v", err)
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -76,6 +77,8 @@ func startTestServer(t *testing.T, cfg ServerConfig) (string, func()) {
 	}
 	return ln.Addr().String(), stop
 }
+
+// Tests
 
 func TestSilentClientTimesOut(t *testing.T) {
 	cfg := testConfig()
@@ -95,41 +98,46 @@ func TestSilentClientTimesOut(t *testing.T) {
 	}
 }
 
-// func TestBroadcastReachesAllClients(t *testing.T) {
-// 	cfg := testConfig()
-// 	addr, stopServer := startTestServer(t, cfg)
-//  defer stopServer()
+// TODO: Request information at standup
+func TestBroadcastReachesAllClients(t *testing.T) {
+	cfg := testConfig()
+	addr, stopServer := startTestServer(t, cfg)
+	defer stopServer()
 
-// 	a := dialTestClient(t, addr)
-// 	b := dialTestClient(t, addr)
+	a := dialTestClient(t, addr)
+	b := dialTestClient(t, addr)
+	defer a.Close()
+	defer b.Close()
 
-// 	for i, conn := range []net.Conn{a, b} {
-// 		hello := fmt.Appendf(nil, "hello-%d", i)
-// 		if err := transport.WriteFrame(conn, hello); err != nil {
-// 			t.Fatal(err)
-// 		}
-// 		conn.SetReadDeadline(time.Now().Add(time.Second))
-// 		if _, err := readNonHeartbeatFrame(t, conn, bufio.NewReader(conn)); err != nil {
-// 			t.Fatalf("expected a welcome frame: %v", err)
-// 		}
-// 	}
+	for i, conn := range []net.Conn{a, b} {
+		clientID := fmt.Sprintf("client-%d", i)
+		if err := transport.WriteFrame(conn, transport.EncodeWelcome(clientID)); err != nil {
+			t.Fatal(err)
+		}
 
-// 	if err := transport.WriteFrame(a, []byte("move")); err != nil {
-// 		t.Fatal(err)
-// 	}
+		conn.SetReadDeadline(time.Now().Add(time.Second))
+		reader := bufio.NewReader(conn)
+		_, err := readNonHeartbeatFrame(t, conn, reader)
+		if err != nil {
+			t.Fatalf("expected a welcome frame: %v", err)
+		}
+	}
 
-// 	for _, conn := range []net.Conn{a, b} {
-// 		conn.SetReadDeadline(time.Now().Add(time.Second))
-// 		reader := bufio.NewReader(conn)
-// 		frame, err := readNonHeartbeatFrame(t, conn, reader)
-// 		if err != nil {
-// 			t.Fatalf("expected a state frame: %v", err)
-// 		}
-// 		if len(frame) == 0 {
-// 			t.Fatal("state frame was empty")
-// 		}
-// 	}
-// }
+	if err := transport.WriteFrame(a, []byte("move")); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, conn := range []net.Conn{a, b} {
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+		reader := bufio.NewReader(conn)
+		_, err := readNonHeartbeatFrame(t, conn, reader)
+
+		if err != nil {
+			t.Fatalf("expected a state frame: %v", err)
+		}
+	}
+}
 
 func TestActionRejectedBeforeHandshake(t *testing.T) {
 	cfg := testConfig()
