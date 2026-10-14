@@ -54,11 +54,16 @@ func TestSessionPipeline_JoinReadyLeave(t *testing.T) {
 
 	g := testutil.MockGame{}
 
-	sess := NewSession("session-1", "TestGame", g, true, "owner-1", ownerSender)
+	sess := NewSession("session-1", "TestGame", g, true)
 
 	go sess.Run(ctx)
 
-	errJoin := sess.Join(ctx, "client-2", clientSender)
+	errOwnerJoin := sess.Join(ctx, "owner-1", "Alice", 2, ownerSender)
+	if errOwnerJoin != nil {
+		t.Fatalf("unexpected error when owner-1 joined: %v", errOwnerJoin)
+	}
+
+	errJoin := sess.Join(ctx, "client-2", "Bob", 2, clientSender)
 	if errJoin != nil {
 		t.Fatalf("unexpected error when client-2 joined: %v", errJoin)
 	}
@@ -137,11 +142,16 @@ func TestSessionJoin_RejectFull(t *testing.T) {
 
 	g := testutil.MockGame{}
 
-	sess := NewSession("session-1", "TestGame", g, true, "owner-1", ownerSender)
+	sess := NewSession("session-1", "TestGame", g, true)
 
 	go sess.Run(ctx)
 
-	errJoin := sess.Join(ctx, "client-2", clientSender)
+	errOwnerJoin := sess.Join(ctx, "owner-1", "Alice", 1, ownerSender)
+	if errOwnerJoin != nil {
+		t.Fatalf("unexpected error when owner-1 joined: %v", errOwnerJoin)
+	}
+
+	errJoin := sess.Join(ctx, "client-2", "Bob", 2, clientSender)
 	if errJoin != nil {
 		t.Fatalf("unexpected error when client-2 joined: %v", errJoin)
 	}
@@ -154,12 +164,12 @@ func TestSessionJoin_RejectFull(t *testing.T) {
 		t.Error("expected client-2 to exist in member map")
 	}
 
-	errReject := sess.Join(ctx, "client-3", rejectSender)
+	errReject := sess.Join(ctx, "client-3", "Bill", 3, rejectSender)
 	if errReject == nil {
-		t.Error("expected error when client joins full session") // TODO: Raise question for role count assignment
+		t.Error("expected error when client joins full session")
 	}
-
 }
+
 func startSession(t *testing.T, g game.Game) (*Session, context.Context) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())

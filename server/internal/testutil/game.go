@@ -44,7 +44,7 @@ func (g MockGame) ViewFor(state game.GameState, memberID string) any {
 
 func (MockGame) Roles() []game.RoleSpec {
 	return []game.RoleSpec{
-		{Name: "Player", Max: 1},
+		{Name: "Player", Max: 2},
 	}
 }
 
