@@ -26,8 +26,6 @@ type MovementPattern struct {
 	squaresInPath func(from Square, to Square) []Square
 }
 
-// TODO: finish movement patterns' evaluate logic. This is tricky because there's unique context for some movesets
-// TODO: IE knights are able to jump over pieces, and kings may castle only if neither they nor their rooks have moved (the board state already tracks castleRights)
 var (
 	// Leftwards or rightwards along one rank
 	horizontal = MovementPattern{
@@ -142,14 +140,14 @@ var (
 				//     *
 				// F       C
 				//   E   D
-				[2]int{2, 1},   // A
-				[2]int{1, 2},   // B
-				[2]int{-1, 2},  // C
-				[2]int{-2, 1},  // D
-				[2]int{-2, -1}, // E
-				[2]int{-1, -2}, // F
-				[2]int{1, -2},  // G
-				[2]int{2, -1},  // H
+				{2, 1},   // A
+				{1, 2},   // B
+				{-1, 2},  // C
+				{-2, 1},  // D
+				{-2, -1}, // E
+				{-1, -2}, // F
+				{1, -2},  // G
+				{2, -1},  // H
 			}
 			rankDiff := int(to.rank - from.rank) // Upcasting
 			fileDiff := int(to.file - from.file) // Upcasting
@@ -200,18 +198,18 @@ var (
 			case White:
 				// _ _ _ _ K _ _ R -> _ _ _ _ _ R K _
 				return []Square{
-					Square{from.rank, 4, nil},
-					Square{from.rank, 5, nil},
-					Square{from.rank, 6, nil},
-					Square{from.rank, 7, nil},
+					{from.rank, 4, nil},
+					{from.rank, 5, nil},
+					{from.rank, 6, nil},
+					{from.rank, 7, nil},
 				}
 			case Black:
 				// R _ _ K _ _ _ _ -> _ K R _ _ _ _ _
 				return []Square{
-					Square{from.rank, 0, nil},
-					Square{from.rank, 1, nil},
-					Square{from.rank, 2, nil},
-					Square{from.rank, 3, nil},
+					{from.rank, 0, nil},
+					{from.rank, 1, nil},
+					{from.rank, 2, nil},
+					{from.rank, 3, nil},
 				}
 			default:
 				return []Square{} // Unreachable
@@ -236,20 +234,20 @@ var (
 			case White:
 				// R _ _ _ K _ _ _ -> _ _ K R _ _ _ _
 				return []Square{
-					Square{from.rank, 0, nil},
-					Square{from.rank, 1, nil},
-					Square{from.rank, 2, nil},
-					Square{from.rank, 3, nil},
-					Square{from.rank, 4, nil},
+					{from.rank, 0, nil},
+					{from.rank, 1, nil},
+					{from.rank, 2, nil},
+					{from.rank, 3, nil},
+					{from.rank, 4, nil},
 				}
 			case Black:
 				// _ _ _ K _ _ _ R -> _ _ _ _ R K _ _
 				return []Square{
-					Square{from.rank, 3, nil},
-					Square{from.rank, 4, nil},
-					Square{from.rank, 5, nil},
-					Square{from.rank, 6, nil},
-					Square{from.rank, 7, nil},
+					{from.rank, 3, nil},
+					{from.rank, 4, nil},
+					{from.rank, 5, nil},
+					{from.rank, 6, nil},
+					{from.rank, 7, nil},
 				}
 			default:
 				return []Square{} // Unreachable
@@ -266,7 +264,7 @@ type PieceType struct {
 }
 
 var (
-	kingType   = PieceType{"king", []MovementPattern{anyAdjacent}, 'K', false}
+	kingType   = PieceType{"king", []MovementPattern{anyAdjacent, kingsideCastle, queensideCastle}, 'K', false}
 	queenType  = PieceType{"queen", []MovementPattern{horizontal, vertical, diagonal}, 'Q', false}
 	bishopType = PieceType{"bishop", []MovementPattern{diagonal}, 'B', false}
 	knightType = PieceType{"knight", []MovementPattern{knightsMove}, 'N', false}
