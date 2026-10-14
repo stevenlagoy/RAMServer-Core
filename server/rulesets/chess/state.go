@@ -2,6 +2,9 @@ package chess
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
+	"unicode"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
 )
@@ -66,7 +69,6 @@ type State struct {
 	moveHistory  []Move                                   // move history
 }
 
-// TODO: Check that this returns a state which gives the correct FEN string
 func newState(whitePlayer string, blackPlayer string) State {
 	return State{
 		makeSquares(),
@@ -85,8 +87,181 @@ func newState(whitePlayer string, blackPlayer string) State {
 	}
 }
 
-func stateFromFEN(FEN string, whitePlayer string, blackPlayer string) State {
-	// TODO: unpack state from FEN string. Assume this is a new board with no history
+func StateFromFEN(FEN string, whitePlayer string, blackPlayer string) (*State, error) {
+	// rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1
+	// 7k/8/8/8/8/8/8/K7 w - - 74 149
+	parts := strings.Split(FEN, " ")
+	if len(parts) != 6 {
+		return nil, fmt.Errorf("FEN string sequence was invalid")
+	}
+	placementField := parts[0]
+	activeColor := parts[1]
+	castlingRights := parts[2]
+	enPassantTarget := parts[3]
+	halfmoveClock, err := strconv.Atoi(parts[4])
+	if err != nil {
+		return nil, fmt.Errorf("Encountered an invalid value for half-move clock in the FEN string")
+	}
+	fullmoveNumber, err := strconv.Atoi(parts[5])
+	if err != nil {
+		return nil, fmt.Errorf("Encountered an invalid value for full-move number in the FEN string")
+	}
+
+	squares := makeSquares()
+
+	// Unpack piece placements
+	pieces := []*Piece{}
+	var file uint8
+	ranks := strings.Split(placementField, "/")
+	if len(ranks) != squaresPerFile {
+		return nil, fmt.Errorf("FEN string placement field had an incorrect number of ranks")
+	}
+	for rank, rankString := range strings.Split(placementField, "/") {
+		if rank > squaresPerFile-1 {
+			return nil, fmt.Errorf("An invalid number of ranks was present in the FEN string placement field")
+		}
+		file = 0
+		for _, piece := range rankString {
+			if file > squaresPerRank-1 {
+				return nil, fmt.Errorf("An invalid number of files was present in the FEN string placement field")
+			}
+			switch piece {
+			case unicode.ToUpper(pawnType.symbol):
+				pieces = append(pieces, &Piece{pawnType, White, Square{uint8(rank), file, nil}})
+				file++
+				break
+			case unicode.ToLower(pawnType.symbol):
+				pieces = append(pieces, &Piece{pawnType, Black, Square{uint8(rank), file, nil}})
+				file++
+				break
+			case unicode.ToUpper(rookType.symbol):
+				pieces = append(pieces, &Piece{rookType, Black, Square{uint8(rank), file, nil}})
+				file++
+				break
+			case unicode.ToLower(rookType.symbol):
+				pieces = append(pieces, &Piece{rookType, Black, Square{uint8(rank), file, nil}})
+				file++
+				break
+			case unicode.ToUpper(knightType.symbol):
+				pieces = append(pieces, &Piece{knightType, Black, Square{uint8(rank), file, nil}})
+				file++
+				break
+			case unicode.ToLower(knightType.symbol):
+				pieces = append(pieces, &Piece{knightType, Black, Square{uint8(rank), file, nil}})
+				file++
+				break
+			case unicode.ToUpper(bishopType.symbol):
+				pieces = append(pieces, &Piece{bishopType, Black, Square{uint8(rank), file, nil}})
+				file++
+				break
+			case unicode.ToLower(bishopType.symbol):
+				pieces = append(pieces, &Piece{bishopType, Black, Square{uint8(rank), file, nil}})
+				file++
+				break
+			case unicode.ToUpper(queenType.symbol):
+				pieces = append(pieces, &Piece{queenType, Black, Square{uint8(rank), file, nil}})
+				file++
+				break
+			case unicode.ToLower(queenType.symbol):
+				pieces = append(pieces, &Piece{queenType, Black, Square{uint8(rank), file, nil}})
+				file++
+				break
+			case unicode.ToUpper(kingType.symbol):
+				pieces = append(pieces, &Piece{kingType, Black, Square{uint8(rank), file, nil}})
+				file++
+				break
+			case unicode.ToLower(kingType.symbol):
+				pieces = append(pieces, &Piece{kingType, Black, Square{uint8(rank), file, nil}})
+				file++
+				break
+			case '1':
+			case '2':
+			case '3':
+			case '4':
+			case '5':
+			case '6':
+			case '7':
+			case '8':
+				file += uint8(piece-'1') + 1
+				break
+			default:
+				return nil, fmt.Errorf("An invalid rune was encountered when placing pieces: %v", piece)
+			}
+		}
+	}
+
+	// Determine next color to move
+	// Perfomance is not an issue here because this section has length 1
+	if len(activeColor) != 1 {
+		return nil, fmt.Errorf("FEN active color field had an invalid value")
+	}
+	var turn Color
+	switch unicode.ToLower([]rune(activeColor)[0]) {
+	case unicode.ToLower(White.symbol):
+		turn = White
+		break
+	case unicode.ToLower(Black.symbol):
+		turn = Black
+		break
+	default:
+		return nil, fmt.Errorf("FEN active color field had an invalid value")
+	}
+
+	// Determine castling rights
+	var castling uint8
+	if strings.Contains(castlingRights, "K") {
+		strings.Replace(castlingRights, "K", "", 1)
+		castling |= 8
+	}
+	if strings.Contains(castlingRights, "Q") {
+		strings.Replace(castlingRights, "Q", "", 1)
+		castling |= 4
+	}
+	if strings.Contains(castlingRights, "k") {
+		strings.Replace(castlingRights, "k", "", 1)
+		castling |= 2
+	}
+	if strings.Contains(castlingRights, "q") {
+		strings.Replace(castlingRights, "q", "", 1)
+		castling |= 1
+	}
+	if castlingRights != "" && castlingRights != "-" {
+		return nil, fmt.Errorf("Castling rights contained an unrecognized character in FEN string")
+	}
+
+	// Determine checks
+	whiteInCheck, blackInCheck, err := PlayersInCheck([32]*Piece(pieces))
+	if err != nil {
+		return nil, fmt.Errorf("Error when evaluting player checks: %w", err)
+	}
+
+	// Determine en passant target square
+	var enPassant *Square
+	enPassantTargetParts := strings.Split(enPassantTarget, "")
+	if enPassantTargetParts[0] == "-" {
+		enPassant = nil
+	} else if len(enPassantTargetParts) != 2 {
+		return nil, fmt.Errorf("En Passant target was invalid in the FEN string")
+	}
+	enPassantRank := []rune(enPassantTargetParts[0])[0]
+	enPassantFile := []rune(enPassantTargetParts[1])[0]
+	enPassant = &Square{uint8(enPassantRank - '1'), uint8(enPassantFile - 'a'), nil}
+
+	return &State{
+		squares,
+		[32]*Piece(pieces),
+		turn,
+		castling,
+		whiteInCheck,
+		blackInCheck,
+		enPassant,
+		halfmoveClock,
+		fullmoveNumber,
+		whitePlayer,
+		blackPlayer,
+		[]State{},
+		[]Move{},
+	}, nil
 }
 
 // TODO: Use heuristics to reduce the computation needed here. This method will be run a LOT
@@ -160,7 +335,7 @@ func (s State) apply(m Move) State {
 	if m.To != nil { // Did a real action
 
 		// TODO: Deep copy s
-		newState := nil
+		newState := State{}
 
 		// Apply the move
 
@@ -178,8 +353,11 @@ func (s State) apply(m Move) State {
 		if m.color == Black {
 			newState.fullmove++
 		}
+
+		return newState
 	} else { // Draw offer with no piece move
 		// TODO: Deep copy s
+		return State{}
 	}
 }
 
@@ -310,9 +488,9 @@ func (s State) ToFEN() string {
 	result += separator
 	result += s.enPassant.toUCI()
 	result += separator
-	result += string(s.halfmove)
+	result += strconv.Itoa(s.halfmove)
 	result += separator
-	result += string(s.fullmove)
+	result += strconv.Itoa(s.fullmove)
 	return result
 }
 
@@ -364,4 +542,40 @@ func (s State) CastlingRights() string {
 		result = "-"
 	}
 	return result
+}
+
+func PlayersInCheck(pieces [maxPiecesPerPlayer * 2]*Piece) (white bool, black bool, error error) {
+	// Find each player's king
+	var whiteKing, blackKing *Piece
+	for _, piece := range pieces {
+		if piece.pieceType.name == kingType.name && piece.color == White {
+			whiteKing = piece
+		}
+		if piece.pieceType.name == kingType.name && piece.color == Black {
+			blackKing = piece
+		}
+	}
+	if whiteKing == nil {
+		return false, false, fmt.Errorf("A white king was not found")
+	}
+	if blackKing == nil {
+		return false, false, fmt.Errorf("A black king was not found")
+	}
+	state := newState("white", "black")
+	state.pieces = pieces
+	// Determine if any white pieces are able to capture the black king
+	whiteInCheck := false
+	for _, action := range state.legalActionSpecs(state.whitePlayer) {
+		if strings.Contains(string(action.Payload), whiteKing.position.toUCI()) {
+			whiteInCheck = true
+		}
+	}
+	// Determine if any black pieces are able to capture the white king
+	blackInCheck := false
+	for _, action := range state.legalActionSpecs(state.blackPlayer) {
+		if strings.Contains(string(action.Payload), blackKing.position.toUCI()) {
+			blackInCheck = true
+		}
+	}
+	return whiteInCheck, blackInCheck, nil
 }
