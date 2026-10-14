@@ -3,6 +3,8 @@ package server
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -27,8 +29,10 @@ type Client struct {
 	config        ServerConfig
 	games         *game.Registry
 	sessions      *session.SessionStore
-	authenticated bool             // true after a successful handshake; readLoop rejects actions while false
-	session       *session.Session // nil until CreateLobby or JoinLobby succeed
+	DisplayName   string           // cosmetic label from AuthRequest; never used as identity
+	connected     bool             // true after a successful ConnectRequest
+	authenticated bool             // true after a successful AuthRequest; readLoop rejects session messages while false
+	session       *session.Session // nil until a JoinSessionRequest succeeds
 }
 
 // Create a new client from the given connection, match, and server configuration
@@ -38,13 +42,14 @@ func NewClient(conn net.Conn, config ServerConfig, games *game.Registry, session
 		out:        make(chan []byte, config.OutQueueSize),
 		ID:         conn.RemoteAddr().String(), // placeholder until handshake assigns real id
 		config:     config,
+		games:      games,
 		sessions:   sessions,
 	}
 }
 
 var (
-	errNotInSession    = errors.New("not currently in a session")
-	errSessionNotFound = errors.New("session not found")
+	errNotInSession    = transport.NewError(transport.CodeNotInSession, "not a member of that session")
+	errSessionNotFound = transport.NewError(transport.CodeSessionNotFound, "session not found")
 )
 
 // Send a message to this client.
@@ -118,20 +123,56 @@ func (c *Client) readLoop(ctx context.Context) {
 		}
 		receivedFirst = true
 
-		if !c.authenticated {
-			newID, err := transport.DecodeHello(frame)
-			if err != nil {
-				c.Send(transport.EncodeReject(0, err))
-				continue // Give the client another chance
-			}
-			c.ID = newID
-			c.authenticated = true
-
-			c.Send(transport.EncodeWelcome(c.ID))
-			continue // Hello frame is not an action
+		msg, err := transport.DecodeClientMessage(frame)
+		if err != nil {
+			c.Send(transport.EncodeError(msg.Sequence, err)) // Sequence is 0 if the envelope did not parse
+			continue
 		}
-		c.dispatch(ctx, frame)
+		if !c.authenticated {
+			c.handshake(msg)
+			continue
+		}
+		c.dispatch(ctx, msg)
 	}
+}
+
+// Handles one pre-authentication message: ConnectRequest, then AuthRequest
+func (c *Client) handshake(msg transport.ClientMessage) {
+	switch {
+	case msg.Kind == transport.KindConnect && !c.connected:
+		if !transport.CompatibleVersion(msg.ProtocolVersion) {
+			c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidProtocolVersion,
+				"client protocol %q is incompatible with server protocol %q", msg.ProtocolVersion, transport.ProtocolVersion)))
+			c.closeAfterFlush()
+			return
+		}
+		c.connected = true
+		c.Send(transport.EncodeConnectResponse(msg.Sequence, c.connection.RemoteAddr().String()))
+	case msg.Kind == transport.KindAuth && c.connected:
+		if msg.DisplayName == "" {
+			c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidArgument, "display_name is required")))
+			return
+		}
+		if msg.PlayerID != "" || msg.ReconnectToken != "" {
+			// TODO: resume identities once issued tokens are persisted
+			c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeAuthFailed, "unknown player_id")))
+			return
+		}
+		c.ID = newRandomID()
+		c.DisplayName = msg.DisplayName
+		c.authenticated = true
+		// TODO: persist (c.ID, reconnectToken) so a later AuthRequest can resume this identity
+		reconnectToken := newRandomID()
+		c.Send(transport.EncodeAuthResponse(msg.Sequence, c.ID, reconnectToken, ""))
+	default:
+		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidState,
+			"%v not valid before authentication completes", msg.Kind)))
+	}
+}
+
+// Gives writeLoop time to send queued replies, then closes the connection
+func (c *Client) closeAfterFlush() {
+	time.AfterFunc(c.config.CloseTimeout, func() { c.connection.Close() })
 }
 
 func (c *Client) writeLoop(ctx context.Context) {
@@ -155,71 +196,87 @@ func (c *Client) writeLoop(ctx context.Context) {
 	}
 }
 
-func (c *Client) dispatch(ctx context.Context, frame []byte) {
-	msg, err := transport.DecodeClientMessage(frame)
-	if err != nil {
-		c.Send(transport.EncodeReject(0, err))
-		return
-	}
+func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 	switch msg.Kind {
-	case transport.KindCreateLobby:
-		c.handleCreateLobby(ctx, msg)
-	case transport.KindJoinLobby:
-		c.handleJoinLobby(ctx, msg)
-	case transport.KindSetReady:
-		if c.session != nil {
-			c.session.SetReady(ctx, c.ID, msg.Ready)
-		}
-	case transport.KindSubmitAction:
-		if c.session == nil {
-			c.Send(transport.EncodeReject(msg.Action.ID, errNotInSession))
+	case transport.KindJoinSession:
+		c.handleJoinSession(ctx, msg)
+	case transport.KindLeaveSession:
+		if c.session == nil || c.session.ID != msg.SessionID {
+			c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
 			return
 		}
+		c.session.Leave(ctx, c.ID)
+		c.session = nil
+		c.Send(transport.EncodeLeaveSessionResponse(msg.Sequence, msg.SessionID))
+	case transport.KindAction:
+		if c.session == nil || c.session.ID != msg.SessionID {
+			c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
+			return
+		}
+		// TODO: enforce msg.ExpectedStateVersion once sessions track state_version
 		action := msg.Action
 		action.ActorID = c.ID // Don't trust IDs claimed by frame
 		c.session.Submit(ctx, action)
-	case transport.KindRequestLegalMoves:
-		if c.session != nil {
-			c.Send(transport.EncodeLegalMoves(c.session.LegalMoves(ctx, c.ID)))
-		}
-	case transport.KindLeaveLobby:
-		if c.session != nil {
-			c.session.Leave(ctx, c.ID)
-			c.session = nil
-		}
+	case transport.KindConnect, transport.KindAuth:
+		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidState, "already authenticated")))
 	default:
-		c.Send(transport.EncodeReject(0, fmt.Errorf("unknown message kind %v", msg.Kind)))
+		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeMalformedMessage, "unknown message kind %v", msg.Kind)))
 	}
 }
 
-func (c *Client) handleCreateLobby(ctx context.Context, msg transport.ClientMessage) {
-	g, err := c.games.New(msg.GameName)
-	if err != nil {
-		c.Send(transport.EncodeReject(0, err))
+func (c *Client) handleJoinSession(ctx context.Context, msg transport.ClientMessage) {
+	if c.session != nil {
+		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeAlreadyInSession, "already in session %q", c.session.ID)))
 		return
 	}
-	s, err := c.sessions.Create(ctx, newSessionID(), msg.GameName, g, msg.Public, c.ID, c)
-	if err != nil {
-		c.Send(transport.EncodeReject(0, err))
+	if msg.GameID == "" {
+		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidArgument, "game_id is required")))
 		return
 	}
-	c.session = s
-}
-
-func (c *Client) handleJoinLobby(ctx context.Context, msg transport.ClientMessage) {
+	// Create a new session
+	if msg.SessionID == "" {
+		// TODO: let the game's policy select an existing session before creating one
+		g, err := c.games.New(msg.GameID)
+		if err != nil {
+			c.Send(transport.EncodeError(msg.Sequence, transport.WrapError(transport.CodeUnknownGame, err)))
+			return
+		}
+		s, err := c.sessions.Create(ctx, newSessionID(), msg.GameID, g, true)
+		if err != nil {
+			c.Send(transport.EncodeError(msg.Sequence, err))
+			return
+		}
+		// Joining like any other member replies with the creator's StateUpdate
+		if err := s.Join(ctx, c.ID, c.DisplayName, msg.Sequence, c); err != nil {
+			c.sessions.Remove(s.ID) // never had a member
+			c.Send(transport.EncodeError(msg.Sequence, err))
+			return
+		}
+		c.session = s
+		return
+	}
+	// Join an existing session
 	s, ok := c.sessions.Get(msg.SessionID)
-	if !ok {
-		c.Send(transport.EncodeReject(0, errSessionNotFound))
+	if !ok || s.GameName != msg.GameID {
+		c.Send(transport.EncodeError(msg.Sequence, errSessionNotFound))
 		return
 	}
-	if err := s.Join(ctx, c.ID, c); err != nil {
-		c.Send(transport.EncodeReject(0, err))
+	if err := s.Join(ctx, c.ID, c.DisplayName, msg.Sequence, c); err != nil {
+		c.Send(transport.EncodeError(msg.Sequence, err))
 		return
 	}
 	c.session = s
 }
 
-// Placeholder ID scheme. TODO: replace based on protocol
 func newSessionID() string {
-	return fmt.Sprintf("session-%d", time.Now().UnixNano())
+	return "session-" + newRandomID()
+}
+
+// Unguessable identifier; also used for reconnect tokens, which must stay secret
+func newRandomID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(fmt.Sprintf("crypto/rand: %v", err))
+	}
+	return hex.EncodeToString(b[:])
 }
