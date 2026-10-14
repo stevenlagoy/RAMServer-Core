@@ -63,10 +63,10 @@ func (g *StubGame) ActiveTurn(state game.GameState) []string {
 	return []string{s.order[s.turn%len(s.order)]} // This is kinda gross sorry but the linter wants it this way
 }
 
-func (g *StubGame) Outcome(state game.GameState) (game.Result, bool) {
+func (g *StubGame) Outcome(state game.GameState) (game.MatchResult, bool) {
 	s := state.(stubState)
 	if s.applied >= s.endAfter {
-		return game.Result{Draw: true}, true
+		return game.Result{}, true
 	}
 	return game.Result{}, false
 }

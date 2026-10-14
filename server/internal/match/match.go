@@ -55,7 +55,8 @@ func isActive(activeIDs []string, id string) bool {
 
 // Reports whether the match has ended
 func (m *Match) Outcome() (game.Result, bool) {
-	return m.Game.Outcome(m.State)
+	res, ok := m.Game.Outcome(m.State)
+	return res.(game.Result), ok
 }
 
 // Returns memberID's view of the current state
