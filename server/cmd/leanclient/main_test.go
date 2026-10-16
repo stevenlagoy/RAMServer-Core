@@ -100,7 +100,7 @@ func dialTestServer(t *testing.T) net.Conn {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		server.Serve(ctx, ln, server.DefaultConfig())
+		server.Serve(ctx, ln, server.DefaultConfig(), nil)
 	}()
 	t.Cleanup(func() {
 		cancel()

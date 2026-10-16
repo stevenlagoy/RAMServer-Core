@@ -10,7 +10,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
 )
 
 // Schema version this server implements, as "<major>.<minor>"

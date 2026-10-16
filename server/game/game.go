@@ -76,6 +76,7 @@ type Result struct {
 	WinnerIDs []string           // ID of any player who won this match
 	Scores    map[string]float32 // scores of each player
 	Reason    TerminationReason  // reason for the match ending
+	Draw      bool               // whether this match ended with a draw
 }
 
 func (r Result) GetWinnerIDs() []string               { return r.WinnerIDs }
