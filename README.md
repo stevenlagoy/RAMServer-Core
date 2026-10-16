@@ -120,16 +120,20 @@ go test -race ./...
 ./scripts/dev.sh generate # regenerate protobuf
 ./scripts/dev.sh test     # run server tests
 ./scripts/dev.sh up       # build and start the server in Docker
+./scripts/leanclients.sh 3 # open 3 leanclients in one tmux window (needs tmux)
 ```
+
+`leanclients.sh [count] [leanclient flags...]` opens one pane per client, named Player1 to PlayerN, and passes any extra flags (such as `-addr`) to every client. Close them all with `tmux kill-session -t leanclients`. The server allows 4 connections per IP address by default (`MaxConnectionsOneIP`), so more than 4 local clients are refused.
 
 **Windows (PowerShell)**
 ```powershell
-.\scripts\dev.ps1 generate
-.\scripts\dev.ps1 test
-.\scripts\dev.ps1 up
+.\scripts\dev.ps1 generate # regenerate protobuf
+.\scripts\dev.ps1 test     # run server tests
+.\scripts\dev.ps1 up       # build and start the server in Docker
+.\scripts\leanclients.ps1  # open 3 leanclients in one Windows Terminal window (needs wt.exe)
 ```
 
-If PowerShell blocks the script, run:
+If PowerShell blocks any script, run:
 `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
 
 ## Documentation

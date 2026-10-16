@@ -134,7 +134,7 @@ func Serve(ctx context.Context, listener net.Listener, config ServerConfig, game
 		case sem <- struct{}{}:
 		default:
 			conn.SetWriteDeadline(time.Now().Add(time.Second))
-			transport.WriteFrame(conn, transport.EncodeReject(0, errors.New("server full")))
+			transport.WriteFrame(conn, transport.EncodeError(0, errors.New("server full")))
 			conn.Close()
 			release()
 			continue
