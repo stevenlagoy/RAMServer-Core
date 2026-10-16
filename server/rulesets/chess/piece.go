@@ -235,7 +235,7 @@ var (
 	bishopType    = PieceType{"bishop", []MovementPattern{diagonal}, 'B', false}
 	knightType    = PieceType{"knight", []MovementPattern{knightsMove}, 'N', false}
 	rookType      = PieceType{"rook", []MovementPattern{horizontal, vertical}, 'R', false}
-	pawnType      = PieceType{"pawn", []MovementPattern{forwardAdjacent, forwardDiagonalAdjacentToCapture, forwardTwiceFirstMove}, 'P', false} // Pawns use P/p in FEN, but have no symbol in SAN or UCI
+	pawnType      = PieceType{"pawn", []MovementPattern{forwardAdjacent, forwardDiagonalAdjacentToCapture, forwardTwiceFirstMove}, 'P', true} // Pawns use P/p in FEN, but have no symbol in SAN or UCI
 	allPieceTypes = []PieceType{kingType, queenType, bishopType, knightType, rookType, pawnType}
 	// Piece types a pawn may promote to (king and pawn not allowed)
 	promotionTypes = []PieceType{queenType, rookType, bishopType, knightType}

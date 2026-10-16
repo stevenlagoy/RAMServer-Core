@@ -1321,3 +1321,11 @@ func BenchmarkLegalActions(b *testing.B) {
 		})
 	}
 }
+
+func TestOnlyPawnsCanPromote(t *testing.T) {
+	for _, pt := range allPieceTypes {
+		if want := pt.name == pawnType.name; pt.canPromote != want {
+			t.Errorf("%s canPromote = %v, want %v", pt.name, pt.canPromote, want)
+		}
+	}
+}
