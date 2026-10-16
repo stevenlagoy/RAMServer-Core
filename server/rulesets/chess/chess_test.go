@@ -21,7 +21,11 @@ const (
 
 func mustState(t *testing.T, fen string) State {
 	t.Helper()
-	return stateFromFEN(fen, whiteID, blackID)
+	state, err := StateFromFEN(fen, whiteID, blackID)
+	if err != nil {
+		t.Fatalf("mustState failed to build game state: %v", err)
+	}
+	return *state
 }
 
 // Returns the player's ID whose turn it is
@@ -160,7 +164,7 @@ func perftDivide(s State, depth int) map[string]uint64 {
 	out := make(map[string]uint64)
 	for _, spec := range s.legalActionSpecs(id) {
 		next := g.Apply(s, game.Action{ActorID: id, Payload: spec.Payload}).(State)
-		out[string(spec.Payload)] = perft(next, depth-1)
+		out[string(spec.Description)] = perft(next, depth-1)
 	}
 	return out
 }
@@ -499,6 +503,7 @@ func TestCastlingAvailability(t *testing.T) {
 
 func TestCastlingMovesTheRook(t *testing.T) {
 	base := "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"
+	walled := "r3k2r/pppppppp/8/8/8/8/8/R3K2R w KQkq - 0 1"
 	tests := []struct {
 		name    string
 		fen     string
@@ -507,8 +512,9 @@ func TestCastlingMovesTheRook(t *testing.T) {
 	}{
 		{"white kingside", base, []string{"e1g1"}, "r3k2r/8/8/8/8/8/8/R4RK1 b kq - 1 1"},
 		{"white queenside", base, []string{"e1c1"}, "r3k2r/8/8/8/8/8/8/2KR3R b kq - 1 1"},
-		{"black kingside after white kingside", base, []string{"e1g1", "e8g8"}, "r4rk1/8/8/8/8/8/8/R4RK1 w - - 2 2"},
-		{"black queenside after white queenside", base, []string{"e1c1", "e8c8"}, "2kr3r/8/8/8/8/8/8/2KR3R w - - 2 2"},
+		// Black pawns block the f and d files: otherwise the white rook attacks the square black's king must cross
+		{"black kingside after white kingside", walled, []string{"e1g1", "e8g8"}, "r4rk1/pppppppp/8/8/8/8/8/R4RK1 w - - 2 2"},
+		{"black queenside after white queenside", walled, []string{"e1c1", "e8c8"}, "2kr3r/pppppppp/8/8/8/8/8/2KR3R w - - 2 2"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1055,5 +1061,263 @@ func TestViewIsTheFullBoard(t *testing.T) {
 		if v.ToFEN() != startFEN {
 			t.Errorf("ViewFor(%q) FEN = %q, want %q", id, v.ToFEN(), startFEN)
 		}
+	}
+}
+
+// SAN output
+
+// Resolves a UCI move against a state and writes it in SAN
+func sanOf(t *testing.T, s State, uci string) string {
+	t.Helper()
+	m, err := s.moveFromPayload([]byte(uci))
+	if err != nil {
+		t.Fatalf("moveFromPayload(%q): %v", uci, err)
+	}
+	san, err := m.toSAN(s)
+	if err != nil {
+		t.Fatalf("toSAN(%q): %v", uci, err)
+	}
+	return san
+}
+
+func TestMoveToSAN(t *testing.T) {
+	tests := []struct {
+		name string
+		fen  string
+		move string
+		want string
+	}{
+		{"pawn push has no symbol or file", startFEN, "e2e4", "e4"},
+		{"knight move", startFEN, "g1f3", "Nf3"},
+		{"pawn capture names its file", "4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1", "e4d5", "exd5"},
+		{"piece capture", "4k3/8/8/3p4/8/8/8/3RK3 w - - 0 1", "d1d5", "Rxd5"},
+		{"en passant is written as a capture to the target square", "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 3", "e5d6", "exd6"},
+		{"promotion", "8/P6k/8/8/8/8/8/4K3 w - - 0 1", "a7a8q", "a8=Q"},
+		{"promotion with capture and check", "1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1", "a7b8q", "axb8=Q+"},
+		{"check", "4k3/8/8/8/8/8/8/R3K3 w - - 0 1", "a1a8", "Ra8+"},
+		{"checkmate", "6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1", "a1a8", "Ra8#"},
+		{"kingside castle", "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "e1g1", "0-0"},
+		{"queenside castle", "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "e1c1", "0-0-0"},
+		{"file disambiguates rooks on one rank", "4k3/8/8/8/8/8/4K3/R6R w - - 0 1", "a1d1", "Rad1"},
+		{"rank disambiguates rooks on one file", "4k3/R7/8/8/8/8/8/R3K3 w - - 0 1", "a1a4", "R1a4"},
+		{"no disambiguation when the other rook is pinned", "b3k3/8/8/3R4/8/8/8/R6K w - - 0 1", "a1d1", "Rd1"},
+		{"both file and rank when needed", "4k3/8/8/8/8/Q7/8/Q1Q1K3 w - - 0 1", "a1c3", "Qa1c3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanOf(t, mustState(t, tt.fen), tt.move); got != tt.want {
+				t.Errorf("SAN = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestToSANRejectsUnresolvedMove(t *testing.T) {
+	m, err := DecodeMove([]byte("e2e4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.toSAN(mustState(t, startFEN)); err == nil {
+		t.Error("toSAN accepted a move which was never resolved against a state")
+	}
+}
+
+func TestResultToSAN(t *testing.T) {
+	s := mustState(t, startFEN)
+	loser := whiteID
+	tests := []struct {
+		name   string
+		result ChessResult
+		want   string
+	}{
+		{"white wins", ChessResult{game.Result{WinnerIDs: []string{whiteID}}, &loser, s}, "1-0"},
+		{"black wins", ChessResult{game.Result{WinnerIDs: []string{blackID}}, &loser, s}, "0-1"},
+		{"stalemate is a draw", ChessResult{game.Result{Reason: ReasonStalemate}, nil, s}, "1/2-1/2"},
+		{"unknown winner", ChessResult{game.Result{WinnerIDs: []string{"someone else"}}, nil, s}, "*"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.result.toSAN(); got != tt.want {
+				t.Errorf("toSAN() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Other State and Game behavior
+
+func TestPlayersInCheck(t *testing.T) {
+	white, black := mustState(t, "4k3/8/8/8/8/8/8/R3K3 w - - 0 1").PlayersInCheck()
+	if white || black {
+		t.Errorf("PlayersInCheck = (%v, %v), want (false, false)", white, black)
+	}
+	white, black = mustState(t, "R3k3/8/8/8/8/8/8/4K3 b - - 0 1").PlayersInCheck()
+	if white || !black {
+		t.Errorf("PlayersInCheck = (%v, %v), want (false, true)", white, black)
+	}
+}
+
+func TestOnlyThePlayerToMoveHasLegalActions(t *testing.T) {
+	g := &Game{}
+	s := mustState(t, startFEN)
+	if got := len(g.LegalActions(s, whiteID)); got != 20 {
+		t.Errorf("white has %d actions at the start, want 20", got)
+	}
+	if got := len(g.LegalActions(s, blackID)); got != 0 {
+		t.Errorf("black has %d actions on white's turn, want 0", got)
+	}
+	if got := len(g.LegalActions(s, "spectator")); got != 0 {
+		t.Errorf("a spectator has %d actions, want 0", got)
+	}
+}
+
+func TestValidateRejectsActionByWrongPlayer(t *testing.T) {
+	g := &Game{}
+	s := mustState(t, startFEN)
+	// A legal move for white, submitted by black
+	err := g.Validate(s, game.Action{ActorID: blackID, Payload: []byte("e2e4")})
+	if !errors.Is(err, game.ErrIllegalAction) {
+		t.Errorf("out of turn action error = %v, want game.ErrIllegalAction", err)
+	}
+}
+
+func TestApplyLeavesStateUnchangedForUndecodablePayload(t *testing.T) {
+	g := &Game{}
+	s := mustState(t, startFEN)
+	got := g.Apply(s, game.Action{ActorID: whiteID, Payload: []byte("garbage")}).(State)
+	if got.ToFEN() != startFEN {
+		t.Errorf("Apply changed the state for an undecodable payload: %q", got.ToFEN())
+	}
+}
+
+func TestNewStatePanicsWithoutTwoPlayers(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("NewState did not panic with a single player")
+		}
+	}()
+	(&Game{}).NewState([]string{"alone"}, map[string]game.Role{"alone": game.RolePlayer})
+}
+
+func TestStateFromFENRejectsInvalidInput(t *testing.T) {
+	tests := []struct{ name, fen string }{
+		{"too few fields", "8/8/8/8/8/8/8/8 w - -"},
+		{"too few ranks", "8/8/8/8/8/8/8 w - - 0 1"},
+		{"short rank", "4k3/8/8/8/8/8/8/3K3 w - - 0 1"},
+		{"long rank", "4k4/8/8/8/8/8/8/4K3 w - - 0 1"},
+		{"unknown piece", "4k3/8/8/8/8/8/8/4X3 w - - 0 1"},
+		{"missing king", "4k3/8/8/8/8/8/8/8 w - - 0 1"},
+		{"two white kings", "4k3/8/8/8/8/8/8/K3K3 w - - 0 1"},
+		{"bad active color", "4k3/8/8/8/8/8/8/4K3 x - - 0 1"},
+		{"bad castling rights", "4k3/8/8/8/8/8/8/4K3 w KX - 0 1"},
+		{"repeated castling right", "4k3/8/8/8/8/8/8/4K3 w KK - 0 1"},
+		{"bad en passant square", "4k3/8/8/8/8/8/8/4K3 w - e9 0 1"},
+		{"en passant on an impossible rank", "4k3/8/8/8/8/8/8/4K3 w - e4 0 1"},
+		{"bad halfmove clock", "4k3/8/8/8/8/8/8/4K3 w - - x 1"},
+		{"bad fullmove number", "4k3/8/8/8/8/8/8/4K3 w - - 0 0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := StateFromFEN(tt.fen, whiteID, blackID); err == nil {
+				t.Errorf("StateFromFEN accepted %q", tt.fen)
+			}
+		})
+	}
+}
+
+func TestSquareShade(t *testing.T) {
+	// a1 is dark, h1 is light, and shades alternate along ranks and files
+	tests := map[string]string{"a1": "dark", "h1": "light", "a2": "light", "b2": "dark", "h8": "dark", "d4": "dark", "e4": "light"}
+	for uci, want := range tests {
+		sq, err := squareFromUCI(uci)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := sq.Shade(); got != want {
+			t.Errorf("%s shade = %q, want %q", uci, got, want)
+		}
+	}
+}
+
+func TestSquareFromUCIRejectsInvalidSquares(t *testing.T) {
+	for _, uci := range []string{"", "e", "e44", "i1", "a0", "a9", "A1", "1a"} {
+		if _, err := squareFromUCI(uci); err == nil {
+			t.Errorf("squareFromUCI(%q) succeeded", uci)
+		}
+	}
+}
+
+func TestInsufficientMaterialIgnoresFurtherPieces(t *testing.T) {
+	// Two knights can still (with help from the defender) deliver mate, so the game must go on
+	if _, done := outcomeOf(t, mustState(t, "8/8/8/4k3/8/8/2NN4/4K3 w - - 0 1")); done {
+		t.Error("king and two knights against king was declared a draw")
+	}
+}
+
+func TestCheckmateTakesPriorityOverSeventyFiveMoveRule(t *testing.T) {
+	res, done := outcomeOf(t, mustState(t, "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 150 80"))
+	if !done || res.Result.TerminationReason() != ReasonCheckmate {
+		t.Errorf("outcome = %v (done=%v), want checkmate", res.Result.TerminationReason(), done)
+	}
+}
+
+func TestPiecesCannotMoveOntoOrThroughTheirOwnPieces(t *testing.T) {
+	// Every piece of the starting position is boxed in except knights and pawns
+	moves := legalUCI(mustState(t, startFEN))
+	for _, bad := range []string{"a1a2", "a1b1", "c1b2", "d1d2", "e1e2", "e1d1", "h1g1"} {
+		if hasMove(moves, bad) {
+			t.Errorf("%s was legal at the start", bad)
+		}
+	}
+}
+
+func TestSlidersMoveInEveryDirection(t *testing.T) {
+	// Regression: movement patterns once subtracted unsigned coordinates, so moves toward a1 failed
+	s := mustState(t, "7k/8/8/8/3Q4/8/8/4K3 w - - 0 1")
+	for _, m := range []string{"d4a1", "d4g1", "d4a7", "d4h8", "d4a4", "d4d1"} {
+		if !hasMove(legalUCI(s), m) {
+			t.Errorf("queen move %s is missing", m)
+		}
+	}
+}
+
+func TestFoolsMateThroughTheGameInterface(t *testing.T) {
+	g := &Game{}
+	var state game.GameState = g.NewState(
+		[]string{whiteID, blackID},
+		map[string]game.Role{whiteID: game.RolePlayer, blackID: game.RolePlayer},
+	)
+	for _, uci := range []string{"f2f3", "e7e5", "g2g4", "d8h4"} {
+		actor := g.ActiveTurn(state)[0] // The same lookup Match.ApplyAction does before validating
+		action := game.Action{ActorID: actor, Payload: []byte(uci)}
+		if err := g.Validate(state, action); err != nil {
+			t.Fatalf("Validate(%s) by %s: %v", uci, actor, err)
+		}
+		if _, done := g.Outcome(state); done {
+			t.Fatalf("game ended before %s", uci)
+		}
+		state = g.Apply(state, action)
+	}
+	result, done := g.Outcome(state)
+	if !done {
+		t.Fatal("fool's mate did not end the game")
+	}
+	cr := result.(ChessResult)
+	if cr.Result.TerminationReason() != ReasonCheckmate || cr.toSAN() != "0-1" {
+		t.Errorf("result = %v %q, want checkmate 0-1", cr.Result.TerminationReason(), cr.toSAN())
+	}
+	if got := len(state.(State).moveHistory); got != 4 {
+		t.Errorf("move history has %d moves, want 4", got)
+	}
+}
+
+func BenchmarkLegalActions(b *testing.B) {
+	for _, pos := range perftPositions[:2] {
+		s, _ := StateFromFEN(pos.fen, whiteID, blackID)
+		b.Run(pos.name, func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				s.legalActionSpecs(whiteID)
+			}
+		})
 	}
 }

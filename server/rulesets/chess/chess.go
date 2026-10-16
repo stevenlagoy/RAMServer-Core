@@ -1,6 +1,10 @@
 package chess
 
-import "github.com/stevenlagoy/ramserver-core/server/game"
+import (
+	"fmt"
+
+	"github.com/stevenlagoy/ramserver-core/server/game"
+)
 
 const Name = "chess"
 
@@ -15,6 +19,7 @@ func (g *Game) Roles() []game.RoleSpec {
 	}
 }
 
+// Panics unless two players are present: ReadyToStart must be satisfied before a match is created
 func (g *Game) NewState(order []string, roles map[string]game.Role) game.GameState {
 	var players []string
 	for _, id := range order {
@@ -22,23 +27,35 @@ func (g *Game) NewState(order []string, roles map[string]game.Role) game.GameSta
 			players = append(players, id)
 		}
 	}
+	if len(players) < 2 {
+		panic(fmt.Sprintf("chess: NewState needs two players, got %d", len(players)))
+	}
 	return newState(players[0], players[1]) // First player to join will play white
 }
 
 func (g *Game) Validate(s game.GameState, a game.Action) error {
-	m, err := DecodeMove(a.Payload)
-	if err != nil {
-		return err // game.ErrMalformedAction wrapper
+	state := s.(State)
+	if a.ActorID != state.activePlayer() {
+		return fmt.Errorf("%w: it is not %q's turn", game.ErrIllegalAction, a.ActorID)
 	}
-	if !s.(State).isLegal(m) {
-		return game.ErrIllegalAction
+	m, err := state.moveFromPayload(a.Payload)
+	if err != nil {
+		return err // game.ErrMalformedAction or game.ErrIllegalAction wrapper
+	}
+	if !state.isLegal(m) {
+		return fmt.Errorf("%w: %s", game.ErrIllegalAction, m.toUCI())
 	}
 	return nil
 }
 
+// Assumes Validate accepted the action. A payload which cannot be decoded leaves the state unchanged
 func (g *Game) Apply(s game.GameState, a game.Action) game.GameState {
-	m, _ := DecodeMove(a.Payload) // already validated
-	return s.(State).apply(m)
+	state := s.(State)
+	m, err := state.moveFromPayload(a.Payload)
+	if err != nil {
+		return state
+	}
+	return state.apply(m)
 }
 
 func (g *Game) ActiveTurn(s game.GameState) []string {

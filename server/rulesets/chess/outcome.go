@@ -8,7 +8,7 @@ const (
 	ReasonDrawOffer            game.TerminationReason = "MUTUAL_DRAW_OFFER"
 	ReasonResignation          game.TerminationReason = "RESIGNATION"
 	ReasonInsufficientMaterial game.TerminationReason = "INSUFFICIENT_MATERIAL"
-	ReasonAutomaticDraw        game.TerminationReason = "AUTOMATIC_DRAW"
+	ReasonAutomaticDraw        game.TerminationReason = "AUTOMATIC_DRAW" // 75-ply rule or 5-fold repetition
 )
 
 type ChessResult struct {
@@ -17,14 +17,17 @@ type ChessResult struct {
 	finalState State   // final state of the board
 }
 
+// Get the result in the symbols specified by the README
+// "1-0" for white win, "0-1" for black win, "1/2-1/2" for a draw
 func (r ChessResult) toSAN() string {
-	if r.Result.TerminationReason() == ReasonDrawOffer {
+	if len(r.Result.WinnerIDs) == 0 { // Draw
 		return "1/2-1/2"
 	}
-	if &r.Result.WinnerIDs[0] == &r.finalState.whitePlayer {
+	switch r.Result.WinnerIDs[0] {
+	case r.finalState.whitePlayer:
 		return "1-0"
-	} else if &r.Result.WinnerIDs[0] == &r.finalState.blackPlayer {
+	case r.finalState.blackPlayer:
 		return "0-1"
 	}
-	return "0-0" // game was not completed
+	return "*" // Game was not completed
 }
