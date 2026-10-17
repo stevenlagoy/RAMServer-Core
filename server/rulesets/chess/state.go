@@ -589,10 +589,6 @@ func (s State) outcome() (game.MatchResult, bool) {
 	return ChessResult{}, false
 }
 
-func (s State) view() State {
-	return s // No hidden state, can see the full board state and history
-}
-
 // Return an array of all the current legal actions for a player with the given id in UCI. Only the player to move has any
 func (s State) legalActionSpecs(id string) []game.ActionSpec {
 	result := []game.ActionSpec{}
