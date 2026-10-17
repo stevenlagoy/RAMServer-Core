@@ -1,6 +1,10 @@
 package testgame
 
-import "github.com/stevenlagoy/ramserver-core/server/game"
+import (
+	"encoding/binary"
+
+	"github.com/stevenlagoy/ramserver-core/server/game"
+)
 
 // Placeholder game to exercise the server
 type StubGame struct {
@@ -80,6 +84,8 @@ func (g *StubGame) ReadyToStart(roster map[string]game.Role, ready map[string]bo
 	return len(roster) > 0
 }
 
-func (g *StubGame) ViewFor(state game.GameState, memberID string) any {
-	return state.(stubState).applied
+func (g *StubGame) ViewFor(state game.GameState, memberID string) []byte {
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, uint64(state.(stubState).applied))
+	return buf
 }

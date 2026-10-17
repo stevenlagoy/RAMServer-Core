@@ -80,8 +80,19 @@ func (g *Game) Outcome(s game.GameState) (game.MatchResult, bool) {
 	return s.(State).outcome()
 }
 
-func (g *Game) ViewFor(s game.GameState, _ string) any {
-	return s.(State).view()
+// View is what a recipient sees. Chess has no hidden information, so every recipient gets the same view
+type View struct {
+	FEN string
+	// TODO: move history in UCI and SAN
+}
+
+func (s State) view() View { return View{FEN: s.ToFEN()} }
+
+// Encode is the chess wire format for encoded_view. Today it is the FEN as ASCII
+func (v View) Encode() []byte { return []byte(v.FEN) }
+
+func (g *Game) ViewFor(s game.GameState, _ string) []byte {
+	return s.(State).view().Encode()
 }
 
 func (g *Game) LegalActions(s game.GameState, id string) []game.ActionSpec {

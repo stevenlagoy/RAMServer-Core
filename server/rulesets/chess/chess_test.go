@@ -1054,12 +1054,13 @@ func TestViewIsTheFullBoard(t *testing.T) {
 	g := &Game{}
 	s := mustState(t, startFEN)
 	for _, id := range []string{whiteID, blackID, "spectator"} {
-		v, ok := g.ViewFor(s, id).(State)
-		if !ok {
+		v := string(g.ViewFor(s, id))
+		vs, err := StateFromFEN(v, s.whitePlayer, s.blackPlayer)
+		if err != nil {
 			t.Fatalf("ViewFor(%q) returned %T, want State", id, g.ViewFor(s, id))
 		}
-		if v.ToFEN() != startFEN {
-			t.Errorf("ViewFor(%q) FEN = %q, want %q", id, v.ToFEN(), startFEN)
+		if vs.ToFEN() != startFEN {
+			t.Errorf("ViewFor(%q) FEN = %q, want %q", id, vs.ToFEN(), startFEN)
 		}
 	}
 }

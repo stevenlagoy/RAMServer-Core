@@ -54,7 +54,7 @@ type Game interface {
 	// Returns the portion of state visible to memberID, so hidden information
 	// can be withheld based on the recipient. Can return the same state to
 	// everyone for games with no hidden information.
-	ViewFor(state GameState, memberID string) any
+	ViewFor(state GameState, memberID string) []byte
 }
 
 type Action struct {
@@ -76,7 +76,6 @@ type Result struct {
 	WinnerIDs []string           // ID of any player who won this match
 	Scores    map[string]float32 // scores of each player
 	Reason    TerminationReason  // reason for the match ending
-	Draw      bool               // whether this match ended with a draw
 }
 
 func (r Result) GetWinnerIDs() []string               { return r.WinnerIDs }
