@@ -1,120 +1,92 @@
 import pygame
 
-from dataclasses import dataclass
-from pathlib import Path
+from piece import Piece
+from board import Board, START_FEN
+from move import Move
+from styles import BoardStyle
+import networking
 
-pygame.init()
+SCREEN_WIDTH, SCREEN_HEIGHT = 1280, 720
+BOARD_WIDTH, BOARD_HEIGHT = 600, 600
 
-screen_width, screen_height = 1280, 720
+SCREEN_CAPTION = "Chess"
 
-screen = pygame.display.set_mode((screen_width, screen_height))
-pygame.display.set_caption("Chess Test")
 
-clock = pygame.time.Clock()
+board_top = (SCREEN_HEIGHT // 2) - (BOARD_HEIGHT // 2)
+board_left = (SCREEN_WIDTH // 2) - (BOARD_WIDTH // 2)
 
-running = True
+def screen_pos_to_board_pos(x: float | tuple[float, float], y: float = 0.0) -> tuple[float, float]:
+    if isinstance(x, tuple):
+        x, y = x
+    return x - board_left, y - board_top
 
-assetsPath = Path().cwd() / "assets"
 
-def fileOrdToChar(file: int) -> str:
-    return chr(file + 96)
+def main() -> None:
+    # Connect and authenticate with server
+    sock = networking.connect()
+    networking.authenticate(sock)
 
-def fileCharToOrd(file: str) -> int:
-    return int(file) - 96
+    # Pygame setup
+    pygame.init()
+    pygame.display.set_caption(SCREEN_CAPTION)
+    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    board = Board((BOARD_WIDTH, BOARD_HEIGHT))
+    board.from_FEN(START_FEN)
+    clock = pygame.time.Clock()
+    style = BoardStyle.STANDARD
+    board.style = style
+    running = True
+    mouse_origin: tuple[float, float] = (0, 0)
+    dragging: bool = False
+    held_piece: Piece | None = None
 
-@dataclass
-class PieceType:
-    name: str
-    type: str
-    symbol: str
-    color: str # light or dark
-    sprite: pygame.Surface
+    # Main loop
+    while running:
+        move: Move | None = None
 
-@dataclass
-class ColorScheme:
-    lightColor: tuple[int, int, int]
-    darkColor: tuple[int, int, int]
-    backgroundColor: tuple[int, int, int]
+        # Input
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_origin = screen_pos_to_board_pos(pygame.mouse.get_pos())
+                dragging = True
+                held_piece = board.piece_at_coords(mouse_origin)
+            elif event.type == pygame.MOUSEBUTTONUP:
+                mouse_end = screen_pos_to_board_pos(pygame.mouse.get_pos())
+                dragging = False
+                if held_piece is None: continue
+                square = board.coords_to_square(mouse_end)
+                held_piece.x = None
+                held_piece.y = None
+                from_rank = held_piece.rank
+                from_file = held_piece.file
+                to_rank = square[0]
+                to_file = square[1]
+                held_piece.rank = to_rank
+                held_piece.file = to_file
+                move = Move(from_rank, to_rank, from_file, to_file)
+            if dragging:
+                mouse_pos = screen_pos_to_board_pos(pygame.mouse.get_pos())
+                if held_piece is None: continue
+                held_piece.x = mouse_pos[0]
+                held_piece.y = mouse_pos[1]
+        
+        # Logic
+        if move is not None:
+            # Submit the action
+            pass
+        
+        # Render
+        screen.fill(style.background_color)
+        board.render()
+        screen.blit(board, (board_left, board_top))
+        pygame.display.flip()
+        clock.tick(60)
 
-whiteAndBlack = ColorScheme((255, 255, 255), (32, 32, 32), (128, 128, 128))
-tanAndBrown = ColorScheme((252, 246, 199), (54, 38, 20), (68, 60, 52))
+    # Pygame teardown
+    pygame.quit()
+    networking.close(sock)
 
-piece_symbols = {"bishop": "B", "king": "K", "knight": "N", "pawn": "P", "queen": "Q", "rook": "R"} # Pawns have a symbol in FEN but not in move notation
-pieces: list[PieceType] = []
-def load_pieces() -> None:
-    global pieces
-    piece_assets = [
-        "bishop-w.svg", "king-w.svg", "king-w.svg", "knight-w.svg", "pawn-w.svg", "queen-w.svg", "rook-w.svg",
-        "bishop-b.svg", "king-b.svg", "king-b.svg", "knight-b.svg", "pawn-b.svg", "queen-b.svg", "rook-b.svg"
-    ]
-    for asset in piece_assets:
-        piece_type = asset.split("-")[0]
-        piece_color = "white" if asset.split("-")[1].split(".")[0] == "w" else "black"
-        symbol = piece_symbols[piece_type]
-        symbol = symbol.lower() if piece_color == "black" else symbol # lowercase black's symbols (FEN)
-        sprite = pygame.image.load(assetsPath / asset)
-        name = piece_color + " " + piece_type
-        pieces.append(PieceType(name, piece_type, symbol, piece_color, sprite))
-load_pieces()
-print(pieces)
-
-start_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-end_FEN_ex = "r1bk3r/p2pBpNp/n4n2/1p1NP2P/6P1/3P4/P1P1K3/q5b1"
-def load_FEN(FEN: str, screen: pygame.Surface) -> None:
-    for rank, line in enumerate(FEN.split(" ")[0].split("/")):
-        skip = 0
-        for file, char in enumerate(line):
-            if char.isnumeric():
-                skip += int(char) - 1
-                continue
-            piece = None
-            for p in pieces:
-                if p.symbol == char:
-                    piece = p
-            if piece is None: continue
-            square_x, square_y = get_square_coords(rank + 1, file + 1 + skip)
-            screen.blit(piece.sprite, (square_x, square_y))
-
-ranks, files = 8, 8
-square_side_length = 45
-center = screen_width / 2, screen_height / 2
-board_width = files * square_side_length
-board_height = ranks * square_side_length
-board_top_left_corner_x = center[0] - (board_height / 2)
-board_top_left_corner_y = center[1] - (board_width / 2)
-
-def get_square_coords(rank: int, file: int | str) -> tuple[float, float]:
-    if isinstance(file, str): file = fileCharToOrd(file)
-    top_left_corner_x = (file * square_side_length) + board_top_left_corner_x
-    top_left_corner_y = (rank * square_side_length) + board_top_left_corner_y
-    return top_left_corner_x, top_left_corner_y
-
-while running:
-    # Look for actions (keyboard, mouse, quitting)
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-
-    # --- GAME LOGIC ---
-
-    # --- RENDERING / DRAWING ---
-    colorScheme = tanAndBrown
-    screen.fill(colorScheme.backgroundColor)
-    for rank in range(ranks):
-        for file in range(files):
-            color = colorScheme.darkColor if rank % 2 + file % 2 == 1 else colorScheme.lightColor
-            top_left_corner_x, top_left_corner_y = get_square_coords(rank + 1, file + 1)
-            rect = pygame.Rect(top_left_corner_x, top_left_corner_y, square_side_length, square_side_length)
-            pygame.draw.rect(screen, color, rect)
-    load_FEN(end_FEN_ex, screen)
-
-    # (Draw your game characters, shapes, or images here!)
-
-    # Update the display to show the changes
-    pygame.display.flip()
-
-    # --- FRAME RATE CONTROL ---
-    # Limit the game to 60 frames per second (FPS)
-    clock.tick(60)
-
-pygame.quit()
+if __name__ == "__main__":
+    main()
