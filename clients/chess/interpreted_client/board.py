@@ -6,13 +6,15 @@ from pygame.draw import rect
 
 from piece import Piece, PieceType, PlayerColor, get_sprite_file
 from styles import BoardStyle
+from piece import PlayerColor
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 
 class Board(Surface):
-    def __init__(self, dimensions: tuple[float, float], pieces: list[Piece] | None = None, *, style: BoardStyle | None = None):
+    def __init__(self, dimensions: tuple[float, float], view_for: PlayerColor, pieces: list[Piece] | None = None, *, style: BoardStyle | None = None):
         super().__init__(dimensions)
+        self.view_for: PlayerColor = view_for
         self.pieces: list[Piece] = pieces or []
         self.style = style or BoardStyle.STANDARD
         self.squares_per_rank: int = 8
@@ -33,7 +35,7 @@ class Board(Surface):
         for rank in range(self.squares_per_file):
             for file in range(self.squares_per_rank):
                 x, y = self.square_to_coords(rank, file)
-                color = self.style.dark_color if (rank + file) % 2 == 1 else self.style.light_color
+                color = self.style.dark_color if (rank + file) % 2 == 0 else self.style.light_color
                 square = Rect(x, y, self.square_width, self.square_height)
                 rect(self, color, square)
 
@@ -48,6 +50,11 @@ class Board(Surface):
         if isinstance(rank, tuple):
             rank, file = rank
         assert rank is not None and file is not None
+
+        if self.view_for == PlayerColor.BLACK:
+            rank = self.squares_per_file - rank - 1
+            file = self.squares_per_rank - file - 1
+
         return (
             file * self.square_width + self.border_radius,
             (self.squares_per_file - rank - 1) * self.square_height + self.border_radius,
@@ -59,6 +66,9 @@ class Board(Surface):
         assert x is not None and y is not None
         file = int((x - self.border_radius) / self.square_width)
         rank = self.squares_per_file - int((y - self.border_radius) / self.square_height) - 1
+        if self.view_for == PlayerColor.BLACK:
+            rank = self.squares_per_file - rank - 1
+            file = self.squares_per_rank - file - 1
         return rank, file
 
     def piece_at_coords(self, x: float | tuple[float, float], y: float | None = None) -> Piece | None:
@@ -76,6 +86,7 @@ class Board(Surface):
         return None
 
     def from_FEN(self, FEN: str) -> None:
+        self.pieces = []
         ranks = FEN.split(" ")[0].split("/")
         for i, string in enumerate(ranks):
             rank = self.squares_per_rank - i - 1

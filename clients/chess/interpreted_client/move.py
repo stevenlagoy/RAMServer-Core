@@ -11,5 +11,8 @@ class Move:
     to_file: int
     promotion: PieceType | None = None
 
-    def encode(self) -> str:
+    def __str__(self) -> str:
         return f"{file_ord_to_char(self.from_file+1)}{self.from_rank+1}{file_ord_to_char(self.to_file+1)}{self.to_rank+1}"
+
+    def encode(self) -> bytes:
+        return self.__str__().encode("ascii")
