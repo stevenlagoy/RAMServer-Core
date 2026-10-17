@@ -31,7 +31,10 @@ const helpText = `Commands:
   create <game_id>                         create a session (JoinSessionRequest without session_id)
   join <game_id> <session_id>              join an existing session
   leave [session_id]                       leave a session (default: current session)
+  ready                                    mark yourself ready in the current session
+  unready                                  withdraw your ready flag
   action <payload>                         send ActionRequest to the current session
+  actions								   list your legal actions in the current session
   raw <text>                               send text as an arbitrary frame (not protobuf)
   help                                     show this list`
 
@@ -80,8 +83,12 @@ func clientMessageKind(msg *pb.ClientMessage) string {
 		return "JOIN"
 	case *pb.ClientMessage_LeaveSessionRequest:
 		return "LEAVE"
+	case *pb.ClientMessage_SetReadyRequest:
+		return "READY"
 	case *pb.ClientMessage_ActionRequest:
 		return "ACTION"
+	case *pb.ClientMessage_LegalActionsRequest:
+		return "LEGAL_ACTIONS_REQUEST"
 	default:
 		return "UNKNOWN"
 	}
@@ -102,6 +109,8 @@ func serverMessageKind(msg *pb.ServerMessage) string {
 		return "RESULT"
 	case *pb.ServerMessage_LeaveSessionResponse:
 		return "LEFT"
+	case *pb.ServerMessage_LegalActionsResponse:
+		return "ACTIONS"
 	default:
 		return "UNKNOWN"
 	}
@@ -163,6 +172,17 @@ func parseCommand(line, currentSession string) (msg *pb.ClientMessage, raw []byt
 		return &pb.ClientMessage{Payload: &pb.ClientMessage_LeaveSessionRequest{LeaveSessionRequest: &pb.LeaveSessionRequest{
 			SessionId: sessionID,
 		}}}, nil, nil
+	case "ready", "unready":
+		if len(args) != 0 {
+			return nil, nil, fmt.Errorf("usage: %s", cmd)
+		}
+		if currentSession == "" {
+			return nil, nil, errors.New("not in a session; create or join one first")
+		}
+		return &pb.ClientMessage{Payload: &pb.ClientMessage_SetReadyRequest{SetReadyRequest: &pb.SetReadyRequest{
+			SessionId: currentSession,
+			Ready:     cmd == "ready",
+		}}}, nil, nil
 	case "action":
 		if rest == "" {
 			return nil, nil, errors.New("usage: action <payload>")
@@ -173,6 +193,13 @@ func parseCommand(line, currentSession string) (msg *pb.ClientMessage, raw []byt
 		return &pb.ClientMessage{Payload: &pb.ClientMessage_ActionRequest{ActionRequest: &pb.ActionRequest{
 			SessionId:     currentSession,
 			EncodedAction: []byte(rest),
+		}}}, nil, nil
+	case "actions":
+		if currentSession == "" {
+			return nil, nil, errors.New("not in a session; create or join one first")
+		}
+		return &pb.ClientMessage{Payload: &pb.ClientMessage_LegalActionsRequest{LegalActionsRequest: &pb.LegalActionsRequest{
+			SessionId: currentSession,
 		}}}, nil, nil
 	case "raw":
 		if rest == "" {

@@ -50,6 +50,7 @@ func NewClient(conn net.Conn, config ServerConfig, games *game.Registry, session
 var (
 	errNotInSession    = transport.NewError(transport.CodeNotInSession, "not a member of that session")
 	errSessionNotFound = transport.NewError(transport.CodeSessionNotFound, "session not found")
+	errSessionMismatch = transport.NewError(transport.CodeSessionMismatch, "session ID mismatch")
 )
 
 // Send a message to this client.
@@ -208,6 +209,16 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 		c.session.Leave(ctx, c.ID)
 		c.session = nil
 		c.Send(transport.EncodeLeaveSessionResponse(msg.Sequence, msg.SessionID))
+	case transport.KindSetReady:
+		if c.session == nil {
+			c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
+			return
+		}
+		if msg.SessionID != c.session.ID {
+			c.Send(transport.EncodeError(msg.Sequence, errSessionMismatch))
+			return
+		}
+		c.session.SetReady(ctx, c.ID, msg.Ready)
 	case transport.KindAction:
 		if c.session == nil || c.session.ID != msg.SessionID {
 			c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
@@ -217,6 +228,13 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 		action := msg.Action
 		action.ActorID = c.ID // Don't trust IDs claimed by frame
 		c.session.Submit(ctx, action)
+	case transport.KindLegalActionsRequest:
+		if c.session == nil || c.session.ID != msg.SessionID {
+			c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
+			return
+		}
+		specs := c.session.LegalMoves(ctx, c.ID) // Empty unless a match is running and it is this player's turn
+		c.Send(transport.EncodeLegalActions(msg.Sequence, transport.LegalActions{PlayerID: c.ID, LegalActions: specs}))
 	case transport.KindConnect, transport.KindAuth:
 		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidState, "already authenticated")))
 	default:

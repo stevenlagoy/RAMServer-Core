@@ -283,18 +283,24 @@ func (s *Session) startMatch() {
 }
 
 func (s *Session) handleSubmit(action game.Action) {
-	if s.current == nil {
-		return
-	}
 	member, ok := s.members[action.ActorID]
 	if !ok {
 		return // stale action from a member who left
 	}
+	if s.current == nil {
+		perr := transport.NewError(transport.CodeInvalidState, "no match in progress")
+		perr.SessionID = s.ID
+		member.Sender.Send(transport.EncodeError(action.ID, perr))
+		return
+	}
 	// Check for out of turn action request
 	if err := s.current.ApplyAction(action); err != nil {
 		code := transport.CodeIllegalAction
-		if errors.Is(err, match.ErrNotYourTurn) {
+		switch {
+		case errors.Is(err, match.ErrNotYourTurn):
 			code = transport.CodeOutOfTurn
+		case errors.Is(err, game.ErrMalformedAction):
+			code = transport.CodeMalformedMessage
 		}
 		perr := transport.WrapError(code, err)
 		perr.SessionID = s.ID
@@ -333,12 +339,17 @@ func (s *Session) viewFor(memberID string) transport.StateUpdate {
 			players = append(players, transport.SessionPlayer{PlayerID: id, DisplayName: m.DisplayName, Connected: true})
 		}
 	}
+	var stateView []byte
+	if s.Game != nil && s.current != nil {
+		stateView = s.Game.ViewFor(s.current.State, memberID)
+	}
 	view := transport.StateUpdate{
-		SessionID: s.ID,
-		GameID:    s.GameName,
-		Status:    transport.StatusWaiting,
-		Players:   players,
-		// TODO: StateVersion, and EncodedView once Game.ViewFor returns game-encoded bytes
+		SessionID:   s.ID,
+		GameID:      s.GameName,
+		Status:      transport.StatusWaiting,
+		Players:     players,
+		EncodedView: stateView,
+		// TODO: StateVersion
 	}
 	if s.current != nil {
 		view.Status = transport.StatusInProgress
@@ -371,7 +382,7 @@ func (s *Session) broadcastMatchEnded(result game.Result, turns int) {
 	payload := transport.EncodeMatchResult(transport.MatchResult{
 		SessionID:       s.ID,
 		WinnerPlayerIDs: result.WinnerIDs,
-		Draw:            result.Draw,
+		Draw:            len(result.WinnerIDs) == 0,
 		Reason:          transport.EndCompleted,
 	})
 	for _, m := range s.members {

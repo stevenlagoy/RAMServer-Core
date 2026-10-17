@@ -35,6 +35,7 @@ const (
 	CodeUnknownGame            = pb.ErrorCode_ERROR_CODE_UNKNOWN_GAME
 	CodeSessionNotFound        = pb.ErrorCode_ERROR_CODE_SESSION_NOT_FOUND
 	CodeSessionNotJoinable     = pb.ErrorCode_ERROR_CODE_SESSION_NOT_JOINABLE
+	CodeSessionMismatch        = pb.ErrorCode_ERROR_CODE_SESSION_MISMATCH
 	CodeOutOfTurn              = pb.ErrorCode_ERROR_CODE_OUT_OF_TURN
 	CodeIllegalAction          = pb.ErrorCode_ERROR_CODE_ILLEGAL_ACTION
 	CodeMalformedMessage       = pb.ErrorCode_ERROR_CODE_MALFORMED_MESSAGE
@@ -80,7 +81,9 @@ const (
 	KindAuth
 	KindJoinSession
 	KindLeaveSession
+	KindSetReady
 	KindAction
+	KindLegalActionsRequest
 )
 
 func (k ClientMessageKind) String() string {
@@ -93,8 +96,12 @@ func (k ClientMessageKind) String() string {
 		return "JoinSessionRequest"
 	case KindLeaveSession:
 		return "LeaveSessionRequest"
+	case KindSetReady:
+		return "SetReadyRequest"
 	case KindAction:
 		return "ActionRequest"
+	case KindLegalActionsRequest:
+		return "LegalActionsRequest"
 	default:
 		return "Unknown"
 	}
@@ -117,6 +124,9 @@ type ClientMessage struct {
 	// KindJoinSession (GameID, SessionID), KindLeaveSession and KindAction (SessionID)
 	GameID    string
 	SessionID string
+
+	// KindSetReady
+	Ready bool
 
 	// KindAction. Action.ID is Sequence; ActorID is left for the caller to set
 	Action               game.Action
@@ -147,11 +157,18 @@ func DecodeClientMessage(frame []byte) (ClientMessage, error) {
 	case *pb.ClientMessage_LeaveSessionRequest:
 		msg.Kind = KindLeaveSession
 		msg.SessionID = p.LeaveSessionRequest.GetSessionId()
+	case *pb.ClientMessage_SetReadyRequest:
+		msg.Kind = KindSetReady
+		msg.SessionID = p.SetReadyRequest.GetSessionId()
+		msg.Ready = p.SetReadyRequest.GetReady()
 	case *pb.ClientMessage_ActionRequest:
 		msg.Kind = KindAction
 		msg.SessionID = p.ActionRequest.GetSessionId()
 		msg.ExpectedStateVersion = p.ActionRequest.GetExpectedStateVersion()
 		msg.Action = game.Action{ID: msg.Sequence, Payload: p.ActionRequest.GetEncodedAction()}
+	case *pb.ClientMessage_LegalActionsRequest:
+		msg.Kind = KindLegalActionsRequest
+		msg.SessionID = p.LegalActionsRequest.GetSessionId()
 	default:
 		return msg, NewError(CodeMalformedMessage, "client message has no known payload")
 	}
@@ -189,6 +206,11 @@ type StateUpdate struct {
 	EncodedView    []byte
 	ActivePlayerID string
 	PlayerOrder    []string
+}
+
+type LegalActions struct {
+	PlayerID     string
+	LegalActions []game.ActionSpec
 }
 
 type SessionPlayer struct {
@@ -261,6 +283,23 @@ func EncodeStateUpdate(inReplyTo uint64, s StateUpdate) []byte {
 			EncodedView:    s.EncodedView,
 			ActivePlayerId: s.ActivePlayerID,
 			PlayerOrder:    s.PlayerOrder,
+		}},
+	})
+}
+
+func EncodeLegalActions(inReplyTo uint64, l LegalActions) []byte {
+	actions := make([]*pb.LegalActionSpec, len(l.LegalActions))
+	for i, a := range l.LegalActions {
+		actions[i] = &pb.LegalActionSpec{
+			Payload:     a.Payload,
+			Description: a.Description,
+		}
+	}
+	return marshal(&pb.ServerMessage{
+		InReplyTo: inReplyTo,
+		Payload: &pb.ServerMessage_LegalActionsResponse{LegalActionsResponse: &pb.LegalActionsResponse{
+			PlayerId:     l.PlayerID,
+			LegalActions: actions,
 		}},
 	})
 }

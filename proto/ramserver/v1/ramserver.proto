@@ -18,6 +18,8 @@ message ClientMessage {
     JoinSessionRequest join_session_request = 4;
     LeaveSessionRequest leave_session_request = 5;
     ActionRequest action_request = 6;
+    SetReadyRequest set_ready_request = 7;
+    LegalActionsRequest legal_actions_request = 8;
   }
 }
 
@@ -31,6 +33,7 @@ message ServerMessage {
     ErrorResponse error_response = 5;
     MatchResult match_result = 6;
     LeaveSessionResponse leave_session_response = 7;
+    LegalActionsResponse legal_actions_response = 8;
   }
 }
 
@@ -77,6 +80,19 @@ message LeaveSessionResponse {
   string session_id = 1;
 }
 
+message LegalActionsResponse {
+  string player_id = 1;
+  repeated LegalActionSpec legal_actions = 2;
+}
+
+// --- Session readiness ---
+
+// Sets whether the sender is ready for the match to start.
+message SetReadyRequest {
+  string session_id = 1;
+  bool ready = 2;
+}
+
 // --- Session actions & state ---
 
 // Game-defined action in any phase (e.g. a start vote or a move).
@@ -84,6 +100,11 @@ message ActionRequest {
   string session_id = 1;
   bytes encoded_action = 2;
   uint64 expected_state_version = 3;
+}
+
+// All game-defined actions which are legal for the current state.
+message LegalActionsRequest {
+  string session_id = 1;
 }
 
 // Session snapshot, broadcast on membership, status, or game-state changes.
@@ -96,6 +117,16 @@ message StateUpdate {
   bytes encoded_view = 6;
   string active_player_id = 7;
   repeated string player_order = 8;
+}
+
+message LegalActions {
+  string player_id = 1;
+  repeated LegalActionSpec legal_actions = 2;
+}
+
+message LegalActionSpec {
+  bytes payload = 1;
+  string description = 2;
 }
 
 message SessionPlayer {
@@ -137,6 +168,7 @@ enum ErrorCode {
   ERROR_CODE_INVALID_ARGUMENT = 12;
   ERROR_CODE_STALE_STATE = 13;
   ERROR_CODE_INTERNAL = 14;
+  ERROR_CODE_SESSION_MISMATCH = 15;
 }
 
 // --- Match completion ---
