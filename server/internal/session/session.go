@@ -6,7 +6,7 @@ import (
 	"log"
 	"runtime/debug"
 
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/match"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
@@ -15,6 +15,9 @@ import (
 type Sender interface {
 	Send(message []byte)
 }
+
+// Automatically mark clients as ready, for testing
+var AutoReady bool
 
 // Once client's participation in a Session's lobby.
 type Member struct {
@@ -208,9 +211,12 @@ func (s *Session) handleJoin(j *joinMsg) {
 	if _, exists := s.members[j.clientID]; !exists {
 		s.order = append(s.order, j.clientID) // only after the join is accepted, so a rejected joiner never gets a turn
 	}
-	s.members[j.clientID] = &Member{ClientID: j.clientID, DisplayName: j.displayName, Sender: j.sender, Role: role}
+	s.members[j.clientID] = &Member{ClientID: j.clientID, DisplayName: j.displayName, Sender: j.sender, Role: role, Ready: AutoReady}
 	j.reply <- nil
 	s.broadcastState(j.clientID, j.seq)
+	if AutoReady && s.readyToStart() { // Testing only: no ready message exists yet
+		s.startMatch()
+	}
 }
 
 // Picks the first role the game declares that still has room. Returns "" if every role is at capacity.

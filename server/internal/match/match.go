@@ -3,7 +3,7 @@ package match
 import (
 	"errors"
 
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
+	"github.com/stevenlagoy/ramserver-core/server/game"
 )
 
 // Holds the live state of one round of play, including Game rules, roster and
@@ -55,7 +55,8 @@ func isActive(activeIDs []string, id string) bool {
 
 // Reports whether the match has ended
 func (m *Match) Outcome() (game.Result, bool) {
-	return m.Game.Outcome(m.State)
+	res, ok := m.Game.Outcome(m.State)
+	return res.(game.Result), ok
 }
 
 // Returns memberID's view of the current state

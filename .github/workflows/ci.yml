@@ -2,8 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main, server, client-1, client-2]
+    branches:
+      - ** # All branches
   pull_request:
+    branches: [main]
 
 jobs:
   proto:

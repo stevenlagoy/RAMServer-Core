@@ -8,8 +8,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
+	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
 
@@ -36,7 +37,7 @@ func (f *fakeSender) next(t *testing.T) *pb.ServerMessage {
 }
 
 // oneSeatGame allows a single player and nothing else
-type oneSeatGame struct{ game.StubGame }
+type oneSeatGame struct{ testgame.StubGame }
 
 func (g *oneSeatGame) Roles() []game.RoleSpec {
 	return []game.RoleSpec{{Name: game.RolePlayer, Min: 1, Max: 1}}
@@ -75,7 +76,7 @@ func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 // Joins refused by the session reach clients as ERROR_CODE_SESSION_NOT_JOINABLE. Tested here
 // because a match cannot yet be started over the protocol.
 func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
-	s, ctx := startSession(t, &game.StubGame{})
+	s, ctx := startSession(t, &testgame.StubGame{})
 	a := newFakeSender()
 	if err := s.Join(ctx, "a", "", 1, a); err != nil {
 		t.Fatal(err)
