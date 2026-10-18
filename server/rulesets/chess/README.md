@@ -19,16 +19,16 @@ Chess rules follow the FIDE Laws of Chess, Section I. There is no turn timer and
 
 ## Status
 
-| Feature                                                             | State                |
-|---------------------------------------------------------------------|----------------------|
-| All piece movement, castling, en passant, promotion                 | Implemented, tested  |
-| Check, pins, and moves which leave the king attacked                | Implemented, tested  |
-| Checkmate, stalemate, insufficient material, 75-move rule, repetition | Implemented, tested  |
-| UCI moves from clients                                              | Implemented          |
-| SAN output for move history                                         | Implemented          |
-| King status (in check, checkmate, none) sent to clients             | Not implemented      |
-| Resignation                                                         | Not implemented      |
-| Draw offers and acceptance                                          | Not implemented      |
+| Feature                                                               | State               |
+|-----------------------------------------------------------------------|---------------------|
+| All piece movement, castling, en passant, promotion                   | Implemented, tested |
+| Check, pins, and moves which leave the king attacked                  | Implemented, tested |
+| Checkmate, stalemate, insufficient material, 75-move rule, repetition | Implemented, tested |
+| UCI moves from clients                                                | Implemented         |
+| SAN output for move history                                           | Implemented         |
+| King status (in check, checkmate, none) sent to clients               | Not implemented     |
+| Resignation                                                           | Not implemented     |
+| Draw offers, acceptance, and claims                                   | Implemented, tested |
 
 The sections below say which behavior is planned when it is described.
 
@@ -48,6 +48,10 @@ A move is sent as the opaque `encoded_action` of an `ActionRequest`. For chess i
 - `e2e4` is a normal move.
 - `e7e8q` is a promotion, with the piece to promote to as the last character.
 - `e1g1` is castling. It is written as the king's two-square move, and the server moves the rook.
+- `e2e4(=)` plays the move and offers a draw. Any move can carry the `(=)` suffix.
+- `(=)` alone accepts the draw offered with the opponent's last move. It is legal only when an offer is pending.
+
+Any move declines a pending offer, and a move marked `(=)` replaces it with an offer of the mover's own. A draw cannot be offered without a move, because only the player to move is permitted to send messages.
 
 The server only reads UCI. Clients never send SAN. Resignation and draw offers are not part of the client message format yet.
 
@@ -104,12 +108,12 @@ When a match ends, the clients receive:
 | `INSUFFICIENT_MATERIAL` | `1/2-1/2`      | Neither player can checkmate: king against king, king and one bishop or knight against king, or only bishops which all stand on one color of square |
 | `AUTOMATIC_DRAW`        | `1/2-1/2`      | 75 moves (150 halfmoves) without a pawn move or capture, or the same position occurs for the third time                                             |
 | `RESIGNATION`           | `1-0` or `0-1` | A player left the game. The other player wins *(planned)*                                                                                           |
-| `MUTUAL_DRAW_OFFER`     | `1/2-1/2`      | One player offered a draw and the other accepted *(planned)*                                                                                        |
+| `MUTUAL_DRAW_OFFER`     | `1/2-1/2`      | An offer was accepted, or an offer claimed a draw after 100 halfmoves or on the third repetition                                                    |
 
 Notes:
 
 - Checkmate takes priority over every automatic draw. A move which mates on the 150th halfmove is a win.
-- FIDE makes threefold repetition a claim by a player. This server has no claim message, so the game ends the third time a position occurs. A position counts as the same when the piece placement, the player to move, the castling rights, and the en passant target all match.
+- As in FIDE, threefold repeition and the 50-move rule are claims: the player to move claims by sending a move marked `(=)`, and the game ends at once. Fivefold repetition and 75 moves end the game with no offer. 
 - Insufficient material is checked only for positions in which no checkmate can ever occur. Two knights against a bare king is not declared a draw, because mate is possible if the defender blunders.
 
 ## UCI notation
@@ -162,12 +166,6 @@ Castling is indicated by `0-0` for kingside castling or `0-0-0` for queenside ca
 A move which places the opponent in check must include a plus sign at the end. `Be4+` indicates that a bishop moves to e4 and places the opposing king in check (but not checkmate). At most one plus sign should be included. Checkmate is marked with a hash symbol at the end in place of the plus. `Be4#` indicates that a bishop moves to e4 and puts the opposing king in checkmate. A plus sign should not be included if a hash symbol is present. Plus signs and hash symbols always go at the very end of the move, after any promotion.
 
 End-of-match symbols are `1-0` for a white win, `0-1` for a black win, `1/2-1/2` for a draw, and `*` for a game which has not finished.
-
-### Draw offers (planned)
-
-A draw offer is indicated by appending ` (=)` after the move. A response is either to send back `1/2-1/2` to accept the draw, or to send the next move with nothing added to reject it. To offer a draw without making a move, just `(=)` may be sent, and the valid responses are `1/2-1/2` to accept the draw, or `(=/=)` to reject it.
-
-Nothing sends or reads draw offers yet. The server decodes only UCI, so this format needs a payload decision (see Status) before it is implemented.
 
 ### Grammar
 

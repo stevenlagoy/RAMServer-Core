@@ -20,7 +20,7 @@ type ChessResult struct {
 // Get the result in the symbols specified by the README
 // "1-0" for white win, "0-1" for black win, "1/2-1/2" for a draw
 func (r ChessResult) toSAN() string {
-	if len(r.Result.WinnerIDs) == 0 { // Draw
+	if r.Result.IsDraw() {
 		return "1/2-1/2"
 	}
 	switch r.Result.WinnerIDs[0] {

@@ -96,5 +96,15 @@ func (g *Game) ViewFor(s game.GameState, _ string) []byte {
 }
 
 func (g *Game) LegalActions(s game.GameState, id string) []game.ActionSpec {
-	return s.(State).legalActionSpecs(id)
+	state := s.(State)
+	specs := state.legalActionSpecs(id)
+	// Player to move may answera  draw offer
+	// Not a part of legalActionSpecs because that list being empty is used to detect checkmate and stalemate
+	if state.activeDrawOffer && id == state.activePlayer() {
+		specs = append(specs, game.ActionSpec{
+			Payload:     []byte(drawOfferMark),
+			Description: fmt.Sprintf("%s accepts the draw offer", state.turn.name),
+		})
+	}
+	return specs
 }

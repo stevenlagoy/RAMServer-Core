@@ -103,17 +103,19 @@ func makeSquares() [squaresPerRank * squaresPerFile]*Square {
 
 // State of the chess gameboard at one moment. A state is never modified after it is built: apply returns a new State
 type State struct {
-	board        [squaresPerRank * squaresPerFile]*Square // Squares are owned by this State only. Index with squareIndex
-	pieces       []*Piece                                 // Captured pieces are removed, promoting pieces change type in place
-	turn         Color                                    // whose turn is it currently?
-	castling     uint8                                    // KQkq bit flags: 0000KQkq
-	enPassant    *Square                                  // target square or nil
-	halfmove     int                                      // number of halfmoves: increments every action, reset to 0 if a pawn moves or a capture
-	fullmove     int                                      // number of fullmoves: increment after every black turn
-	whitePlayer  string                                   // playerID bound at NewState
-	blackPlayer  string                                   // playerID bound at NewState
-	stateHistory []string                                 // position key of every state reached, including this one: use for repetition
-	moveHistory  []Move                                   // move history
+	board           [squaresPerRank * squaresPerFile]*Square // Squares are owned by this State only. Index with squareIndex
+	pieces          []*Piece                                 // Captured pieces are removed, promoting pieces change type in place
+	turn            Color                                    // whose turn is it currently?
+	castling        uint8                                    // KQkq bit flags: 0000KQkq
+	enPassant       *Square                                  // target square or nil
+	halfmove        int                                      // number of halfmoves: increments every action, reset to 0 if a pawn moves or a capture
+	fullmove        int                                      // number of fullmoves: increment after every black turn
+	whitePlayer     string                                   // playerID bound at NewState
+	blackPlayer     string                                   // playerID bound at NewState
+	stateHistory    []string                                 // position key of every state reached, including this one: use for repetition
+	moveHistory     []Move                                   // move history
+	activeDrawOffer bool                                     // Whether a draw offer is active from any player
+	drawAccepted    bool                                     // Whether a draw offer was accepted
 }
 
 func newState(whitePlayer string, blackPlayer string) State {
@@ -292,6 +294,16 @@ func (s State) kingOf(color Color) *Piece {
 	return nil
 }
 
+func (s State) piecesOf(color Color) []*Piece {
+	result := make([]*Piece, 0, len(s.pieces))
+	for _, piece := range s.pieces {
+		if piece.color == color {
+			result = append(result, piece)
+		}
+	}
+	return result
+}
+
 // Determine whether every square is empty
 func (s State) pathClear(squares []Square) bool {
 	for _, square := range squares {
@@ -360,6 +372,10 @@ func (s State) isEnPassant(m Move) bool {
 // Fill in the parts of a decoded Move which depend on the board: moving piece, its color, whether it captures.
 // Fails with ErrIllegalAction if there is no piece of the player to move on the From square
 func (s State) resolve(m Move) (Move, error) {
+	if m.isDrawResponse() { // Draw accept needs no square lookups
+		m.color = s.turn
+		return m, nil
+	}
 	if m.From == nil || m.To == nil {
 		return m, fmt.Errorf("%w: the move has no origin or target square", game.ErrIllegalAction)
 	}
@@ -379,6 +395,11 @@ func (s State) resolve(m Move) (Move, error) {
 // Whether a resolved move (see resolve) may be played in this state: the piece moves in a way it is allowed to, nothing blocks it,
 // it promotes to a valid type exactly when it reaches the last rank, and it does not leave its own king attacked.
 func (s State) isLegal(m Move) bool {
+	// (=) alone accepts opponent's draw offer
+	if m.isDrawResponse() {
+		return s.activeDrawOffer
+	}
+
 	if m.From == nil || m.To == nil || m.piece == nil { // Not a piece move, or not resolved
 		return false
 	}
@@ -490,18 +511,19 @@ func (s State) makeMove(m Move) State {
 	next.turn = m.color.opponent()
 
 	next.update()
+	next.activeDrawOffer = false // Always reset draw offers when not accepted
 	return next
-
 }
 
 // Returns the GameState after action is applied. Must not mutate in-place: see GameState. Should not do its own validation: see isLegal
 func (s State) apply(m Move) State {
-	// Determine whether we did a real action or just offered a draw
-	if m.From == nil || m.To == nil { // Draw offer
-		// TODO: record the offer once draw offers are implemented
-		return s.deepCopy()
-	} // Did a real action
+	if m.isDrawResponse() { // Accepts the offer after validation, no change to board
+		next := s.deepCopy()
+		next.drawAccepted = s.activeDrawOffer // Validate rejects invalid answers
+		return next
+	}
 	next := s.makeMove(m)
+	next.activeDrawOffer = m.offeringDraw
 	// Clip so that append copies. States which share a history slice would otherwise overwrite each other's entries
 	next.stateHistory = append(slices.Clip(s.stateHistory), next.positionKey())
 	next.moveHistory = append(slices.Clip(s.moveHistory), m)
@@ -537,7 +559,7 @@ func (s State) insufficientMaterial() bool {
 		case bishopType.name:
 			bishops++
 			shades[piece.position.Shade()] = true
-		default: // Pawn, rook, or queen can always eventually checkmate
+		default: // All other types (pawn, rook, queen, etc) can always eventually checkmate
 			return false
 		}
 	}
@@ -551,11 +573,11 @@ func (s State) drawResult(reason game.TerminationReason) (game.MatchResult, bool
 
 // Check for win conditions. The expensive part, generating the moves of the player to move, is done exactly once
 // TODO: Check whether a player resigned.
-// TODO: Check whether a draw was accepted, and whether a draw offered after the 50-move mark (s.halfmove >= 100) is accepted automatically
 func (s State) outcome() (game.MatchResult, bool) {
-	// A player with no legal moves has either been checkmated or stalemated. This has priority over automatic draws
+	// A player with no legal moves has been checkmated, stalemated, or has no pieces remaining
+	// This has priority over automatic draws
 	if len(s.legalActionSpecs(s.activePlayer())) == 0 {
-		if s.inCheck(s.turn) {
+		if s.inCheck(s.turn) || len(s.piecesOf(s.turn)) == 0 { // Checkmate or no more pieces
 			loser := s.activePlayer()
 			winner := s.playerID(s.turn.opponent())
 			return ChessResult{game.Result{WinnerIDs: []string{winner}, Reason: ReasonCheckmate}, &loser, s}, true
@@ -563,26 +585,38 @@ func (s State) outcome() (game.MatchResult, bool) {
 		return s.drawResult(ReasonStalemate)
 	}
 
+	// Check whether a draw was accepted
+	if s.drawAccepted {
+		return s.drawResult(ReasonDrawOffer)
+	}
+
 	// Check whether players lack sufficient material
 	if s.insufficientMaterial() {
 		return s.drawResult(ReasonInsufficientMaterial)
 	}
 
-	// Check whether we reached the 75-move limit (150 halfmoves) for automatic arbiter draw enforcement
-	if s.halfmove >= 150 {
+	// Check whether we reached a move limit for draw enforcement
+	if s.halfmove >= 150 { // 75-move limit (150 halfmoves) forces a draw
 		return s.drawResult(ReasonAutomaticDraw)
+	} else if s.halfmove >= 100 { // 50-move limit (100 halfmoves) mean draw offers are automatically accepted
+		if s.activeDrawOffer {
+			return s.drawResult(ReasonDrawOffer)
+		}
 	}
 
-	// Threefold repetition
-	// TODO: FIDE makes this a claim and fivefold repetiton automatic, but this server has no claim message so the game ends when a position occurs a third time
+	// Check whether we reached a repetition limit for draw enforcement
 	repetitions := 0
 	for _, key := range s.stateHistory {
 		if key == s.stateHistory[len(s.stateHistory)-1] {
 			repetitions++
 		}
 	}
-	if repetitions >= 3 {
+	if repetitions >= 5 { // Arbiter forces a draw for fivefold repetition
 		return s.drawResult(ReasonAutomaticDraw)
+	} else if repetitions >= 3 { // Draw offer is automatically accepted for threefold repetition
+		if s.activeDrawOffer {
+			return s.drawResult(ReasonDrawOffer)
+		}
 	}
 
 	// Game is not complete
@@ -630,12 +664,7 @@ func (s State) legalActionSpecs(id string) []game.ActionSpec {
 			}
 		}
 	}
-	// TODO: This messes up perft in testing, and also players are able to combine a draw offer with any other valid move (except checkmates)
-	// // Add draw offer as a legal move
-	// result = append(result, game.ActionSpec{
-	// 	Payload:     Move{nil, nil, nil, s.turn, false, true, nil}.Encode(),
-	// 	Description: fmt.Sprintf("%v offers draw", s.turn.name),
-	// })
+	// Any action can have a draw offer appended to it, but this is not returned as part of ActionSpecs.
 	return result
 }
 

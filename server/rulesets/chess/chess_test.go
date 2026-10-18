@@ -803,24 +803,6 @@ func TestSeventyFiveMoveRule(t *testing.T) {
 	}
 }
 
-// TODO: threefold should allow claim to end the game, fivefold is automatic
-func TestThreefoldRepetitionEndsTheGame(t *testing.T) {
-	s := mustState(t, startFEN)
-	shuffle := []string{"g1f3", "g8f6", "f3g1", "f6g8"}
-	for round := 0; round < 2; round++ {
-		for _, m := range shuffle {
-			s = play(t, s, m)
-		}
-	}
-	res, done := outcomeOf(t, s)
-	if !done {
-		t.Fatal("game continued after the start position occurred three times")
-	}
-	if len(res.Result.WinnerIDs) != 0 {
-		t.Errorf("repetition produced winners: %v", res.Result.WinnerIDs)
-	}
-}
-
 func TestMoveCounters(t *testing.T) {
 	s := mustState(t, startFEN)
 	steps := []struct {

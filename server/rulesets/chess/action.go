@@ -1,6 +1,7 @@
 package chess
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"unicode"
@@ -12,23 +13,33 @@ import (
 
 // Payload is ASCII UCIL "e7e4", or "e7e8q" for promotion. Castling is the king's move ("e1g1").
 // A decoded Move only knows its squares and promotion. State.resolve fills in the piece, color, and capture.
-// TODO: Draw offers are not transmitted yet. See offeringDraw
 type Move struct {
 	From, To     *Square
 	piece        *Piece
 	color        Color
 	capturing    bool
-	offeringDraw bool // TODO: nothing sets this yet. Decide how a draw offer is sent, then decode it in DecodeMove
+	offeringDraw bool
 	Promotion    *PieceType
 }
 
 // Get the UCI representation of this move. Includes From UCI, To UCI, and promotion type symbol. Example: `a7a8q`
 func (m Move) toUCI() string {
-	result := m.From.toUCI() + m.To.toUCI()
+	result := ""
+	if m.From != nil && m.To != nil {
+		result = m.From.toUCI() + m.To.toUCI()
+	}
 	if m.Promotion != nil {
 		result += string(unicode.ToLower(m.Promotion.symbol))
 	}
+	if m.offeringDraw {
+		result += drawOfferMark
+	}
 	return result
+}
+
+// Whether this is a base (=) draw accept response
+func (m Move) isDrawResponse() bool {
+	return m.offeringDraw && m.From == nil && m.To == nil
 }
 
 const (
@@ -123,8 +134,16 @@ func (s State) disambiguation(m Move) string {
 }
 
 // Decode an ASCII UCI payload: four characters ("e2e4") or five with a promotion piece ("e7e8q").
+// A trailing (=) offers a draw ("e2e4(=)"). (=) alone accepts an offer.
 // This only reads the payload: whether the move makes sense on a board is determined by State.resolve and State.isLegal.
 func DecodeMove(b []byte) (Move, error) {
+	offeringDraw := bytes.HasSuffix(b, []byte(drawOfferMark))
+	if offeringDraw {
+		b = b[:len(b)-len(drawOfferMark)]
+		if len(b) == 0 { // (=) alone
+			return Move{offeringDraw: true}, nil
+		}
+	}
 	if len(b) != 4 && len(b) != 5 {
 		return Move{}, fmt.Errorf("%w: the message had an invalid size", game.ErrMalformedAction)
 	}
@@ -149,7 +168,8 @@ func DecodeMove(b []byte) (Move, error) {
 			return Move{}, fmt.Errorf("%w: a promotion was specified but the promotion type was invalid", game.ErrMalformedAction)
 		}
 	}
-	return Move{From: &from, To: &to, Promotion: promotionType}, nil
+
+	return Move{From: &from, To: &to, offeringDraw: offeringDraw, Promotion: promotionType}, nil
 }
 
 func (s State) moveFromPayload(payload []byte) (Move, error) {
