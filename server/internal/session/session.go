@@ -371,7 +371,7 @@ func (s *Session) broadcastMatchEnded(result game.Result, turns int) {
 	payload := transport.EncodeMatchResult(transport.MatchResult{
 		SessionID:       s.ID,
 		WinnerPlayerIDs: result.WinnerIDs,
-		Draw:            result.Draw,
+		Draw:            result.IsDraw(),
 		Reason:          transport.EndCompleted,
 	})
 	for _, m := range s.members {

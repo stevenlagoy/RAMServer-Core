@@ -80,6 +80,7 @@ type Result struct {
 
 func (r Result) GetWinnerIDs() []string               { return r.WinnerIDs }
 func (r Result) TerminationReason() TerminationReason { return r.Reason }
+func (r Result) IsDraw() bool                         { return len(r.WinnerIDs) == 0 }
 
 // Describes one action a member may currently take. Payload is the same game-
 // defined encoding as a client submits to validate or submit an action.
