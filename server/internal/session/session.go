@@ -42,22 +42,24 @@ type Session struct {
 
 	// Below owned exclusively by Run goroutine
 
-	order   []string // join order, order[0] is current owner
-	members map[string]*Member
-	history []MatchResult
-	current *match.Match
+	order        []string // join order, order[0] is current owner
+	members      map[string]*Member
+	history      []MatchResult
+	current      *match.Match
+	stateVersion uint64
 }
 
 // Creates a Session with owner as its first member
 func NewSession(id, gameName string, g game.Game, public bool, ownerID string, owner Sender) *Session {
 	return &Session{
-		ID:       id,
-		GameName: gameName,
-		Game:     g,
-		Public:   public,
-		inbox:    make(chan sessionMsg),
-		order:    []string{ownerID},
-		members:  map[string]*Member{ownerID: {ClientID: ownerID, Sender: owner}},
+		ID:           id,
+		GameName:     gameName,
+		Game:         g,
+		Public:       public,
+		inbox:        make(chan sessionMsg),
+		order:        []string{ownerID},
+		members:      map[string]*Member{ownerID: {ClientID: ownerID, Sender: owner}},
+		stateVersion: 1,
 	}
 }
 
@@ -106,6 +108,10 @@ var (
 	ErrLobbyFull = errors.New("lobby is full")
 	// Returned by Join when a match is already in progress and game does not allow joining mid-match
 	ErrAlreadyStarted = errors.New("match already in progress")
+
+	ErrNotInSession = errors.New("player is not in the requested session")
+
+	ErrStaleState = errors.New("action was submitted against an outdated state")
 )
 
 // Adds clientID to the lobby, blocking until Run processes the request or ctx is cancelled
@@ -202,7 +208,7 @@ func (s *Session) handle(msg sessionMsg) {
 	case msg.setReady != nil:
 		s.handleSetReady(msg.setReady)
 	case msg.submit != nil:
-		s.handleSubmit(msg.submit.action)
+		s.handleSubmit(msg.submit)
 	case msg.legalMoves != nil:
 		s.handleLegalMoves(msg.legalMoves)
 	}
@@ -291,18 +297,37 @@ func (s *Session) startMatch() {
 	s.broadcastState()
 }
 
-func (s *Session) handleSubmit(action game.Action) {
+func (s *Session) handleSubmit(req *submitMsg) {
+	action := req.action
+
+	// Verify the request targets this session.
+	if req.sessionID != s.ID {
+		req.sender.Send(transport.EncodeReject(action.ID, ErrNotInSession))
+		return
+	}
+
+	// Verify the authenicated player is a member.
+	if _, ok := s.members[action.ActorID]; !ok {
+		req.sender.Send(transport.EncodeReject(action.ID, ErrNotInSession))
+		return
+	}
+
+	// Verify the action was submitted against the current state.
+	if req.expectedStateVer != 0 && req.expectedStateVer != s.stateVersion {
+		req.sender.Send(transport.EncodeReject(action.ID, ErrStaleState))
+		return
+	}
+
 	if s.current == nil {
 		return
 	}
-	member, ok := s.members[action.ActorID]
-	if !ok {
-		return // stale action from a member who left
-	}
 	if err := s.current.ApplyAction(action); err != nil {
-		member.Sender.Send(transport.EncodeReject(action.ID, err))
+		req.sender.Send(transport.EncodeReject(action.ID, err))
 		return
 	}
+
+	// Accepted actions advance the authoritative state version.
+	s.stateVersion++
 	s.broadcastState()
 	if result, done := s.current.Outcome(); done {
 		s.endMatch(result)
