@@ -8,9 +8,11 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
+	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/chess"
 )
 
 // fakeSender records every frame a Session sends to one member
@@ -36,7 +38,7 @@ func (f *fakeSender) next(t *testing.T) *pb.ServerMessage {
 }
 
 // oneSeatGame allows a single player and nothing else
-type oneSeatGame struct{ game.StubGame }
+type oneSeatGame struct{ testgame.StubGame }
 
 func (g *oneSeatGame) Roles() []game.RoleSpec {
 	return []game.RoleSpec{{Name: game.RolePlayer, Min: 1, Max: 1}}
@@ -75,7 +77,7 @@ func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 // Joins refused by the session reach clients as ERROR_CODE_SESSION_NOT_JOINABLE. Tested here
 // because a match cannot yet be started over the protocol.
 func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
-	s, ctx := startSession(t, &game.StubGame{})
+	s, ctx := startSession(t, &testgame.StubGame{})
 	a := newFakeSender()
 	if err := s.Join(ctx, "a", "", 1, a); err != nil {
 		t.Fatal(err)
@@ -97,5 +99,106 @@ func TestFullLobbyIsNotJoinable(t *testing.T) {
 	var perr *transport.ProtocolError
 	if !errors.As(ErrLobbyFull, &perr) || perr.Code != transport.CodeSessionNotJoinable {
 		t.Fatalf("ErrLobbyFull has code %v, want CodeSessionNotJoinable", perr)
+	}
+}
+
+// Tests that a MatchResult is received in a real game implementation.
+func TestChessCheckmateEndsTheMatch(t *testing.T) {
+	s, ctx := startSession(t, &chess.Game{})
+	white, black := newFakeSender(), newFakeSender()
+	if err := s.Join(ctx, "white", "", 1, white); err != nil { // first to join plays white
+		t.Fatal(err)
+	}
+	if err := s.Join(ctx, "black", "", 1, black); err != nil {
+		t.Fatal(err)
+	}
+	s.SetReady(ctx, "white", true)
+	s.SetReady(ctx, "black", true)
+	for _, f := range []*fakeSender{white, black} {
+		for f.next(t).GetStateUpdate().GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
+		}
+	}
+
+	// Fool's mate: 1. f3 e5 2. g4 Qh4#
+	moves := []struct{ actor, uci string }{
+		{"white", "f2f3"}, {"black", "e7e5"}, {"white", "g2g4"}, {"black", "d8h4"},
+	}
+	for i, m := range moves {
+		seq := uint64(10 + i)
+		s.Submit(ctx, game.Action{ID: seq, ActorID: m.actor, Payload: []byte(m.uci)})
+		for _, f := range []*fakeSender{white, black} {
+			if got := f.next(t); got.GetStateUpdate() == nil {
+				t.Fatalf("move %s: expected a StateUpdate, got %v", m.uci, got)
+			}
+		}
+	}
+
+	for name, f := range map[string]*fakeSender{"white": white, "black": black} {
+		got := f.next(t)
+		result := got.GetMatchResult()
+		if result == nil || got.GetInReplyTo() != 0 {
+			t.Fatalf("%s: expected an unsolicited MatchResult after checkmate, got %v", name, got)
+		}
+		if result.GetDraw() || len(result.GetWinnerPlayerIds()) != 1 || result.GetWinnerPlayerIds()[0] != "black" {
+			t.Fatalf("%s: expected black to win, got %v", name, result)
+		}
+	}
+}
+
+// secretGame shows each member only their own secret, like a hand of cards
+type secretGame struct{ testgame.StubGame }
+
+func (g *secretGame) ViewFor(_ game.GameState, memberID string) []byte {
+	return []byte("secret-of-" + memberID)
+}
+
+// startMatch joins each id, readies everyone, and returns each member's sender and first in-progress StateUpdate
+func startMatch(t *testing.T, s *Session, ctx context.Context, ids ...string) (map[string]*fakeSender, map[string]*pb.StateUpdate) {
+	t.Helper()
+	senders := make(map[string]*fakeSender, len(ids))
+	for _, id := range ids {
+		senders[id] = newFakeSender()
+		if err := s.Join(ctx, id, "", 1, senders[id]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range ids {
+		s.SetReady(ctx, id, true)
+	}
+	started := make(map[string]*pb.StateUpdate, len(ids))
+	for id, f := range senders {
+		for started[id].GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
+			started[id] = f.next(t).GetStateUpdate()
+		}
+	}
+	return senders, started
+}
+
+func TestEachMemberReceivesOnlyTheirOwnView(t *testing.T) {
+	s, ctx := startSession(t, &secretGame{})
+	_, started := startMatch(t, s, ctx, "a", "b")
+	for id, state := range started {
+		if got, want := string(state.GetEncodedView()), "secret-of-"+id; got != want {
+			t.Fatalf("%s's encoded_view = %q, want %q", id, got, want)
+		}
+	}
+}
+
+func TestChessViewIsTheCurrentPosition(t *testing.T) {
+	const startFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+	s, ctx := startSession(t, &chess.Game{})
+	senders, started := startMatch(t, s, ctx, "white", "black") // first to join plays white
+	for id, state := range started {
+		if got := string(state.GetEncodedView()); got != startFEN {
+			t.Fatalf("%s's starting view = %q, want %q", id, got, startFEN)
+		}
+	}
+
+	s.Submit(ctx, game.Action{ID: 5, ActorID: "white", Payload: []byte("e2e4")})
+	const afterE4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+	for _, f := range senders {
+		if got := string(f.next(t).GetStateUpdate().GetEncodedView()); got != afterE4 {
+			t.Fatalf("view after e2e4 = %q, want %q", got, afterE4)
+		}
 	}
 }
