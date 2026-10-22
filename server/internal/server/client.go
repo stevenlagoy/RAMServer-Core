@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 	"runtime/debug"
@@ -129,6 +130,15 @@ func (c *Client) readLoop(ctx context.Context) {
 			continue
 		}
 		if !c.authenticated {
+			if msg.Kind == transport.KindAction {
+				slog.Warn("action rejected",
+					"session_id", msg.SessionID,
+					"connection_id", c.ID,
+					"sequence", msg.Sequence,
+					"error_code", transport.CodeInvalidState.String(),
+					"reason", "action before authentication",
+				)
+			}
 			c.handshake(msg)
 			continue
 		}
@@ -210,6 +220,13 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 		c.Send(transport.EncodeLeaveSessionResponse(msg.Sequence, msg.SessionID))
 	case transport.KindAction:
 		if c.session == nil || c.session.ID != msg.SessionID {
+			slog.Warn("action rejected",
+				"session_id", msg.SessionID,
+				"player_id", c.ID,
+				"sequence", msg.Sequence,
+				"error_code", transport.CodeNotInSession.String(),
+				"reason", "client not bound to requested session",
+			)
 			c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
 			return
 		}

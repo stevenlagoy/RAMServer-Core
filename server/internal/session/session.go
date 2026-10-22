@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"runtime/debug"
 
 	"github.com/stevenlagoy/ramserver-core/server/internal/game"
@@ -240,6 +241,7 @@ func (s *Session) handleJoin(j *joinMsg) {
 		s.order = append(s.order, j.clientID) // only after the join is accepted, so a rejected joiner never gets a turn
 	}
 	s.members[j.clientID] = &Member{ClientID: j.clientID, DisplayName: j.displayName, Sender: j.sender, Role: role}
+	s.stateVersion++
 	j.reply <- nil
 	s.broadcastState(j.clientID, j.seq)
 }
@@ -269,6 +271,7 @@ func (s *Session) handleLeave(l *leaveMsg) {
 			break
 		}
 	}
+	s.stateVersion++
 	if len(s.members) == 0 {
 		return // caller removes Session from store
 	}
@@ -280,7 +283,11 @@ func (s *Session) handleSetReady(r *setReadyMsg) {
 	if !ok {
 		return
 	}
+	if member.Ready == r.ready {
+		return
+	}
 	member.Ready = r.ready
+	s.stateVersion++
 	if s.current == nil && s.readyToStart() {
 		s.startMatch()
 		return
@@ -310,50 +317,57 @@ func (s *Session) startMatch() {
 func (s *Session) handleSubmit(req *submitMsg) {
 	action := req.action
 
-	// Verify the request targets this session.
 	if req.sessionID != s.ID {
-		perr := transport.WrapError(transport.CodeNotInSession, ErrNotInSession)
-		perr.SessionID = s.ID
-		req.sender.Send(transport.EncodeError(action.ID, perr))
+		s.rejectAction(req, transport.CodeNotInSession, ErrNotInSession)
 		return
 	}
 
-	// Verify the authenicated player is a member.
 	if _, ok := s.members[action.ActorID]; !ok {
-		perr := transport.WrapError(
-			transport.CodeNotInSession, ErrNotInSession)
-		perr.SessionID = s.ID
-		req.sender.Send(transport.EncodeError(action.ID, perr))
+		s.rejectAction(req, transport.CodeNotInSession, ErrNotInSession)
 		return
 	}
 
-	// Verify the action was submitted against the current state.
-	if req.expectedStateVer != 0 && req.expectedStateVer != s.stateVersion {
-		perr := transport.WrapError(transport.CodeStaleState, ErrStaleState)
-		perr.SessionID = s.ID
-		req.sender.Send(transport.EncodeError(action.ID, perr))
+	if req.expectedStateVer != 0 &&
+		req.expectedStateVer != s.stateVersion {
+		s.rejectAction(req, transport.CodeStaleState, ErrStaleState)
 		return
 	}
 
 	if s.current == nil {
+		s.rejectAction(
+			req,
+			transport.CodeIllegalAction,
+			errors.New("action not allowed while the session is waiting"),
+		)
 		return
 	}
+
 	if err := s.current.ApplyAction(action); err != nil {
 		code := transport.CodeIllegalAction
-		if errors.Is(err, match.ErrNotYourTurn) {
+
+		switch {
+		case errors.Is(err, match.ErrNotYourTurn):
 			code = transport.CodeOutOfTurn
+		case errors.Is(err, game.ErrMalformedAction):
+			code = transport.CodeMalformedMessage
 		}
 
-		perr := transport.WrapError(code, err)
-		perr.SessionID = s.ID
-
-		req.sender.Send(transport.EncodeError(action.ID, perr))
+		s.rejectAction(req, code, err)
 		return
 	}
 
-	// Accepted actions advance the authoritative state version.
 	s.stateVersion++
+
+	slog.Info("action accepted",
+		"session_id", s.ID,
+		"player_id", action.ActorID,
+		"sequence", action.ID,
+		"state_version", s.stateVersion,
+		"match_turn", s.current.Turns,
+	)
+
 	s.broadcastState(action.ActorID, action.ID)
+
 	if result, done := s.current.Outcome(); done {
 		s.endMatch(result)
 	}
@@ -366,6 +380,8 @@ func (s *Session) endMatch(result game.Result) {
 	for _, m := range s.members {
 		m.Ready = false // require re-ready before next round
 	}
+	s.stateVersion++
+	s.broadcastUnsolicitedState()
 }
 
 func (s *Session) handleLegalMoves(l *legalMovesMsg) {
@@ -391,7 +407,6 @@ func (s *Session) viewFor(memberID string) transport.StateUpdate {
 		Status:       transport.StatusWaiting,
 		Players:      players,
 		StateVersion: s.stateVersion,
-		// TODO: StateVersion, and EncodedView once Game.ViewFor returns game-encoded bytes
 	}
 	if s.current != nil {
 		view.Status = transport.StatusInProgress
@@ -430,4 +445,26 @@ func (s *Session) broadcastMatchEnded(result game.Result, turns int) {
 	for _, m := range s.members {
 		m.Sender.Send(payload) // identical for every recipient, so the slice is shared
 	}
+}
+
+func (s *Session) rejectAction(
+	req *submitMsg,
+	code transport.ErrorCode,
+	err error,
+) {
+	action := req.action
+
+	slog.Warn("action rejected",
+		"session_id", req.sessionID,
+		"player_id", action.ActorID,
+		"sequence", action.ID,
+		"state_version", s.stateVersion,
+		"error_code", code.String(),
+		"reason", err.Error(),
+		"match_active", s.current != nil,
+	)
+
+	perr := transport.WrapError(code, err)
+	perr.SessionID = req.sessionID
+	req.sender.Send(transport.EncodeError(action.ID, perr))
 }
