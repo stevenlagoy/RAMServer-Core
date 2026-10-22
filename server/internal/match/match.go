@@ -53,10 +53,10 @@ func isActive(activeIDs []string, id string) bool {
 	return false
 }
 
-// Reports whether the match has ended
-func (m *Match) Outcome() (game.Result, bool) {
-	res, ok := m.Game.Outcome(m.State)
-	return res.(game.Result), ok
+// Reports whether the match has ended. The result is whatever MatchResult the game returns, so it
+// must only be used through the interface's methods: games may return their own result types
+func (m *Match) Outcome() (game.MatchResult, bool) {
+	return m.Game.Outcome(m.State)
 }
 
 // Returns memberID's view of the current state

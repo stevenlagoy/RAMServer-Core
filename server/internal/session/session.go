@@ -31,7 +31,7 @@ type Member struct {
 // One completed round for Session history and leaderboards
 type MatchResult struct {
 	Turns  int
-	Result game.Result
+	Result game.MatchResult
 }
 
 // Sole actor for everything that happens within: Run goroutine owns members,
@@ -307,7 +307,7 @@ func (s *Session) handleSubmit(action game.Action) {
 	}
 }
 
-func (s *Session) endMatch(result game.Result) {
+func (s *Session) endMatch(result game.MatchResult) {
 	s.history = append(s.history, MatchResult{Turns: s.current.Turns, Result: result})
 	s.broadcastMatchEnded(result, s.current.Turns)
 	s.current = nil
@@ -366,12 +366,12 @@ func (s *Session) broadcastState(requesterID string, seq uint64) {
 	}
 }
 
-func (s *Session) broadcastMatchEnded(result game.Result, turns int) {
+func (s *Session) broadcastMatchEnded(result game.MatchResult, turns int) {
 	// TODO: per-player summaries from the action log, and end reasons other than completion
 	payload := transport.EncodeMatchResult(transport.MatchResult{
 		SessionID:       s.ID,
-		WinnerPlayerIDs: result.WinnerIDs,
-		Draw:            result.IsDraw(),
+		WinnerPlayerIDs: result.GetWinnerIDs(),
+		Draw:            len(result.GetWinnerIDs()) == 0, // no winner means a draw
 		Reason:          transport.EndCompleted,
 	})
 	for _, m := range s.members {
