@@ -1,9 +1,8 @@
 from dataclasses import dataclass
 from enum import Enum, StrEnum
-from pygame import Surface
 from pathlib import Path
 
-ASSETS = Path.cwd() / "assets"
+ASSETS = Path(__file__).resolve().parent / "assets"
 SPRITE_EXTENSION = "svg"
 
 
@@ -25,8 +24,7 @@ class Piece:
     file: int
     color: PlayerColor
     piece_type: PieceType
-    sprite: Surface
-    x: float | None = None
+    x: float | None = None  # board-relative cursor position while being dragged
     y: float | None = None
 
 def get_sprite_file(color: PlayerColor, piece_type: PieceType) -> Path:

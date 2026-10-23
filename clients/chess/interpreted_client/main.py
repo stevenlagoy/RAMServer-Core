@@ -10,18 +10,18 @@ from move import Move
 from styles import BoardStyle
 import networking
 
-SCREEN_WIDTH, SCREEN_HEIGHT = 1280, 720
-BOARD_WIDTH, BOARD_HEIGHT = 600, 600
+SCREEN_WIDTH, SCREEN_HEIGHT = 1280, 720  # initial window size; the window can be resized
+MIN_WIDTH, MIN_HEIGHT = 320, 320
+BOARD_FILL = 0.9  # board size as a fraction of the window's shorter side
 
 SCREEN_CAPTION = "Chess"
 
-board_top = (SCREEN_HEIGHT // 2) - (BOARD_HEIGHT // 2)
-board_left = (SCREEN_WIDTH // 2) - (BOARD_WIDTH // 2)
 
-def screen_pos_to_board_pos(x: float | tuple[float, float], y: float = 0.0) -> tuple[float, float]:
-    if isinstance(x, tuple):
-        x, y = x
-    return x - board_left, y - board_top
+def layout(board: Board, screen: pygame.Surface) -> None:
+    """Size and center the board for the current window size."""
+    width, height = screen.get_size()
+    board.resize(int(min(width, height) * BOARD_FILL))
+    board.center_on((width // 2, height // 2))
 
 
 def main() -> None:
@@ -42,15 +42,14 @@ def main() -> None:
     # Pygame setup
     pygame.init()
     pygame.display.set_caption(SCREEN_CAPTION)
-    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    board = Board((BOARD_WIDTH, BOARD_HEIGHT), networking.own_color)
+    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.RESIZABLE)
+    board = Board(0, networking.own_color or PlayerColor.WHITE)
+    layout(board, screen)
     board.from_FEN(START_FEN)
     clock = pygame.time.Clock()
     style = BoardStyle.STANDARD if args.style.upper() == "STANDARD" else BoardStyle.COLORFUL
     board.style = style
     running = True
-    mouse_origin: tuple[float, float] = (0, 0)
-    dragging: bool = False
     held_piece: Piece | None = None
 
     # Main loop
@@ -61,29 +60,27 @@ def main() -> None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_origin = screen_pos_to_board_pos(pygame.mouse.get_pos())
-                dragging = True
-                held_piece = board.piece_at_coords(mouse_origin)
-            elif event.type == pygame.MOUSEBUTTONUP:
-                mouse_end = screen_pos_to_board_pos(pygame.mouse.get_pos())
-                dragging = False
-                if held_piece is None: continue
-                square = board.coords_to_square(mouse_end)
-                held_piece.x = None
-                held_piece.y = None
-                from_rank = held_piece.rank
-                from_file = held_piece.file
-                to_rank = square[0]
-                to_file = square[1]
-                held_piece.rank = to_rank
-                held_piece.file = to_file
-                move = Move(from_rank, from_file, to_rank, to_file)
-            if dragging:
-                mouse_pos = screen_pos_to_board_pos(pygame.mouse.get_pos())
-                if held_piece is None: continue
-                held_piece.x = mouse_pos[0]
-                held_piece.y = mouse_pos[1]
+            elif event.type == pygame.VIDEORESIZE:
+                if event.w < MIN_WIDTH or event.h < MIN_HEIGHT:
+                    screen = pygame.display.set_mode((max(event.w, MIN_WIDTH), max(event.h, MIN_HEIGHT)), pygame.RESIZABLE)
+                screen = pygame.display.get_surface()
+                layout(board, screen)
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                pos = board.screen_to_board(event.pos)
+                piece = board.piece_at(pos)
+                # Only your own pieces can be picked up. Your color is unknown until the match starts
+                if piece is not None and piece.color == networking.own_color:
+                    held_piece = piece
+                    held_piece.x, held_piece.y = pos
+            elif event.type == pygame.MOUSEMOTION and held_piece is not None:
+                held_piece.x, held_piece.y = board.screen_to_board(event.pos)
+            elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and held_piece is not None:
+                held_piece.x = held_piece.y = None  # snap back to its square unless the drop is a move
+                square = board.square_at(board.screen_to_board(event.pos))
+                if square is not None and square != (held_piece.rank, held_piece.file):
+                    move = Move(held_piece.rank, held_piece.file, *square)
+                    held_piece.rank, held_piece.file = square  # shown until the server's next state replaces it
+                held_piece = None
         
         # Logic
         if (state := networking.get_recent_state()) is not None:
@@ -92,15 +89,15 @@ def main() -> None:
             print(f"networking.own_color = {networking.own_color}")
             print(f"board.view_for = {board.view_for}")
             print(f"Black pieces: {[(p.rank, p.file) for p in board.pieces if p.color == PlayerColor.BLACK]}")
-            board.view_for = networking.own_color
+            board.view_for = networking.own_color or PlayerColor.WHITE
+            held_piece = None  # the board was rebuilt, so any held piece no longer exists
         if move is not None:
             # Submit the action
             networking.send_action(sock, move)
         
         # Render
         screen.fill(style.background_color)
-        board.render()
-        screen.blit(board, (board_left, board_top))
+        board.draw(screen)
         pygame.display.flip()
         clock.tick(60)
 

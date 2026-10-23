@@ -21,7 +21,7 @@ ServerMessage: Any = getattr(gen.ramserver.v1.ramserver_pb2, "ServerMessage")
 sequence: int = 1
 player_id: str = ""
 session_id: str = ""
-own_color: PlayerColor = PlayerColor.WHITE
+own_color: PlayerColor | None = None  # known once the match starts
 
 def connect() -> socket.socket:
     global sequence
