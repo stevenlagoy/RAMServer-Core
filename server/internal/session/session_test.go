@@ -159,7 +159,7 @@ func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 		t.Fatalf("err = %v, want ErrLobbyFull", err)
 	}
 
-	s.SetReady(ctx, "a", true) // starts the match; turn order is copied from s.order
+	s.SetReady(ctx, "a", true, 2) // starts the match; turn order is copied from s.order
 	state := a.next(t).GetStateUpdate()
 	if state.GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
 		t.Fatalf("expected match to start, got %v", state)
@@ -178,7 +178,7 @@ func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.next(t)
-	s.SetReady(ctx, "a", true)
+	s.SetReady(ctx, "a", true, 2)
 	if state := a.next(t).GetStateUpdate(); state.GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
 		t.Fatalf("expected match to start, got %v", state)
 	}
@@ -207,8 +207,8 @@ func TestChessCheckmateEndsTheMatch(t *testing.T) {
 	if err := s.Join(ctx, "black", "", 1, black); err != nil {
 		t.Fatal(err)
 	}
-	s.SetReady(ctx, "white", true)
-	s.SetReady(ctx, "black", true)
+	s.SetReady(ctx, "white", true, 2)
+	s.SetReady(ctx, "black", true, 2)
 	for _, f := range []*fakeSender{white, black} {
 		for f.next(t).GetStateUpdate().GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
 		}
