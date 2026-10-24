@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stevenlagoy/ramserver-core/server/game"
+	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
@@ -69,7 +71,9 @@ func startTestServer(t *testing.T, cfg ServerConfig) (string, func()) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		Serve(ctx, ln, cfg)
+		games := game.NewRegistry()
+		games.Register("stub", func() game.Game { return &testgame.StubGame{} })
+		Serve(ctx, ln, cfg, games)
 	}()
 	stop := func() {
 		cancel()
@@ -452,5 +456,118 @@ func TestPlayerCannotJoinTwoSessions(t *testing.T) {
 	sendMessage(t, alice, leaveRequest(8, aliceSession)) // still a member of her own session
 	if resp := expectMessage(t, alice, aliceR); resp.GetLeaveSessionResponse() == nil {
 		t.Fatalf("expected Alice to still be in her own session, got %v", resp)
+	}
+}
+
+func readyRequest(seq uint64, sessionID string, ready bool) *pb.ClientMessage {
+	return &pb.ClientMessage{
+		Sequence: seq,
+		Payload:  &pb.ClientMessage_SetReadyRequest{SetReadyRequest: &pb.SetReadyRequest{SessionId: sessionID, Ready: ready}},
+	}
+}
+
+func legalActionsRequest(seq uint64, sessionID string) *pb.ClientMessage {
+	return &pb.ClientMessage{
+		Sequence: seq,
+		Payload:  &pb.ClientMessage_LegalActionsRequest{LegalActionsRequest: &pb.LegalActionsRequest{SessionId: sessionID}},
+	}
+}
+
+func actionRequest(seq uint64, sessionID, payload string) *pb.ClientMessage {
+	return &pb.ClientMessage{
+		Sequence: seq,
+		Payload:  &pb.ClientMessage_ActionRequest{ActionRequest: &pb.ActionRequest{SessionId: sessionID, EncodedAction: []byte(payload)}},
+	}
+}
+
+// expectState reads the next message and fails unless it is a StateUpdate with status, replying to seq (0 for a broadcast)
+func expectState(t *testing.T, conn net.Conn, r *bufio.Reader, seq uint64, status pb.SessionStatus) *pb.StateUpdate {
+	t.Helper()
+	resp := expectMessage(t, conn, r)
+	state := resp.GetStateUpdate()
+	if state == nil || resp.GetInReplyTo() != seq || state.GetStatus() != status {
+		t.Fatalf("expected %v StateUpdate in reply to %d, got %v", status, seq, resp)
+	}
+	return state
+}
+
+// Plays a whole stub match using only protocol messages: join, ready up, act, and receive the result
+func TestStubMatchOverProtocol(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, aliceID := authenticate(t, addr, "Alice")
+	bob, bobR, _ := authenticate(t, addr, "Bob")
+	sessionID := createSession(t, alice, aliceR, 3)
+	sendMessage(t, bob, joinRequest(3, "stub", sessionID))
+	expectState(t, bob, bobR, 3, pb.SessionStatus_SESSION_STATUS_WAITING)
+	expectState(t, alice, aliceR, 0, pb.SessionStatus_SESSION_STATUS_WAITING)
+
+	// Alice readies: her reply is the lobby state, and the match has not started
+	sendMessage(t, alice, readyRequest(4, sessionID, true))
+	expectState(t, alice, aliceR, 4, pb.SessionStatus_SESSION_STATUS_WAITING)
+	expectState(t, bob, bobR, 0, pb.SessionStatus_SESSION_STATUS_WAITING)
+
+	// Bob readies last, so his reply is the first in-progress state
+	sendMessage(t, bob, readyRequest(4, sessionID, true))
+	started := expectState(t, bob, bobR, 4, pb.SessionStatus_SESSION_STATUS_IN_PROGRESS)
+	expectState(t, alice, aliceR, 0, pb.SessionStatus_SESSION_STATUS_IN_PROGRESS)
+	if started.GetActivePlayerId() != aliceID {
+		t.Fatalf("expected Alice to move first, got %q", started.GetActivePlayerId())
+	}
+
+	// Only the player to move has legal actions
+	sendMessage(t, alice, legalActionsRequest(5, sessionID))
+	resp := expectMessage(t, alice, aliceR)
+	legal := resp.GetLegalActionsResponse()
+	if resp.GetInReplyTo() != 5 || legal.GetPlayerId() != aliceID || len(legal.GetLegalActions()) != 1 || string(legal.GetLegalActions()[0].GetPayload()) != "NoOp" {
+		t.Fatalf("expected Alice's NoOp action in reply to 5, got %v", resp)
+	}
+	sendMessage(t, bob, legalActionsRequest(5, sessionID))
+	if resp := expectMessage(t, bob, bobR); resp.GetInReplyTo() != 5 || len(resp.GetLegalActionsResponse().GetLegalActions()) != 0 {
+		t.Fatalf("expected no legal actions for Bob in reply to 5, got %v", resp)
+	}
+
+	// Readying again once the match is running is rejected
+	sendMessage(t, alice, readyRequest(6, sessionID, false))
+	expectError(t, alice, aliceR, 6, pb.ErrorCode_ERROR_CODE_INVALID_STATE)
+
+	// The stub match ends after four actions, alternating players
+	players := []struct {
+		conn net.Conn
+		r    *bufio.Reader
+	}{{alice, aliceR}, {bob, bobR}}
+	for i := range 4 {
+		actor, other := players[i%2], players[(i+1)%2]
+		seq := uint64(10 + i)
+		sendMessage(t, actor.conn, actionRequest(seq, sessionID, "NoOp"))
+		expectState(t, actor.conn, actor.r, seq, pb.SessionStatus_SESSION_STATUS_IN_PROGRESS)
+		expectState(t, other.conn, other.r, 0, pb.SessionStatus_SESSION_STATUS_IN_PROGRESS)
+	}
+	for name, p := range map[string]struct {
+		conn net.Conn
+		r    *bufio.Reader
+	}{"Alice": players[0], "Bob": players[1]} {
+		resp := expectMessage(t, p.conn, p.r)
+		if resp.GetMatchResult() == nil || resp.GetInReplyTo() != 0 || !resp.GetMatchResult().GetDraw() {
+			t.Fatalf("%s: expected an unsolicited drawn MatchResult, got %v", name, resp)
+		}
+	}
+}
+
+func TestReadyAndLegalActionsRequireSession(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	conn, r, _ := authenticate(t, addr, "Alice")
+
+	sendMessage(t, conn, readyRequest(3, "session-missing", true))
+	expectError(t, conn, r, 3, pb.ErrorCode_ERROR_CODE_NOT_IN_SESSION)
+	sendMessage(t, conn, legalActionsRequest(4, "session-missing"))
+	expectError(t, conn, r, 4, pb.ErrorCode_ERROR_CODE_NOT_IN_SESSION)
+
+	// Before the match starts there are no legal actions yet
+	sessionID := createSession(t, conn, r, 5)
+	sendMessage(t, conn, legalActionsRequest(6, sessionID))
+	if resp := expectMessage(t, conn, r); resp.GetInReplyTo() != 6 || resp.GetLegalActionsResponse() == nil || len(resp.GetLegalActionsResponse().GetLegalActions()) != 0 {
+		t.Fatalf("expected an empty LegalActionsResponse in reply to 6, got %v", resp)
 	}
 }

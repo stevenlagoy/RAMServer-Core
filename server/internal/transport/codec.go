@@ -6,14 +6,14 @@ import (
 	"log"
 	"strings"
 
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
 )
 
 // Schema version this server implements, as "<major>.<minor>"
-const ProtocolVersion = "1.0"
+const ProtocolVersion = "1.1"
 
 // Reports whether a client built against clientVersion may connect
 func CompatibleVersion(clientVersion string) bool {
@@ -81,6 +81,8 @@ const (
 	KindJoinSession
 	KindLeaveSession
 	KindAction
+	KindSetReady
+	KindLegalActions
 )
 
 func (k ClientMessageKind) String() string {
@@ -95,6 +97,10 @@ func (k ClientMessageKind) String() string {
 		return "LeaveSessionRequest"
 	case KindAction:
 		return "ActionRequest"
+	case KindSetReady:
+		return "SetReadyRequest"
+	case KindLegalActions:
+		return "LegalActionsRequest"
 	default:
 		return "Unknown"
 	}
@@ -114,9 +120,12 @@ type ClientMessage struct {
 	PlayerID       string
 	ReconnectToken string
 
-	// KindJoinSession (GameID, SessionID), KindLeaveSession and KindAction (SessionID)
+	// KindJoinSession (GameID, SessionID); KindLeaveSession, KindAction, KindSetReady and KindLegalActions (SessionID)
 	GameID    string
 	SessionID string
+
+	// KindSetReady
+	Ready bool
 
 	// KindAction. Action.ID is Sequence; ActorID is left for the caller to set
 	Action               game.Action
@@ -152,6 +161,13 @@ func DecodeClientMessage(frame []byte) (ClientMessage, error) {
 		msg.SessionID = p.ActionRequest.GetSessionId()
 		msg.ExpectedStateVersion = p.ActionRequest.GetExpectedStateVersion()
 		msg.Action = game.Action{ID: msg.Sequence, Payload: p.ActionRequest.GetEncodedAction()}
+	case *pb.ClientMessage_SetReadyRequest:
+		msg.Kind = KindSetReady
+		msg.SessionID = p.SetReadyRequest.GetSessionId()
+		msg.Ready = p.SetReadyRequest.GetReady()
+	case *pb.ClientMessage_LegalActionsRequest:
+		msg.Kind = KindLegalActions
+		msg.SessionID = p.LegalActionsRequest.GetSessionId()
 	default:
 		return msg, NewError(CodeMalformedMessage, "client message has no known payload")
 	}
@@ -240,6 +256,21 @@ func EncodeLeaveSessionResponse(inReplyTo uint64, sessionID string) []byte {
 		InReplyTo: inReplyTo,
 		Payload: &pb.ServerMessage_LeaveSessionResponse{LeaveSessionResponse: &pb.LeaveSessionResponse{
 			SessionId: sessionID,
+		}},
+	})
+}
+
+// Reply to a LegalActionsRequest: the actions playerID may take right now. Send only to that player
+func EncodeLegalActionsResponse(inReplyTo uint64, playerID string, actions []game.ActionSpec) []byte {
+	specs := make([]*pb.LegalActionSpec, len(actions))
+	for i, a := range actions {
+		specs[i] = &pb.LegalActionSpec{Payload: a.Payload, Description: a.Description}
+	}
+	return marshal(&pb.ServerMessage{
+		InReplyTo: inReplyTo,
+		Payload: &pb.ServerMessage_LegalActionsResponse{LegalActionsResponse: &pb.LegalActionsResponse{
+			PlayerId:     playerID,
+			LegalActions: specs,
 		}},
 	})
 }
