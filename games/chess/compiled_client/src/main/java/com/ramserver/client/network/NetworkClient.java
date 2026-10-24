@@ -6,7 +6,6 @@ import org.ramserver.proto.v1.*;
 
 import java.io.*;
 import java.net.Socket;
-import java.util.Arrays;
 
 public class NetworkClient {
     private final String host;
