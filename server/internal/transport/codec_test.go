@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
 )
 
@@ -275,5 +276,50 @@ func TestEncodeMatchResult(t *testing.T) {
 	draw := decodeServerMessage(t, EncodeMatchResult(MatchResult{SessionID: "s1", Draw: true, Reason: EndCompleted})).GetMatchResult()
 	if !draw.GetDraw() || len(draw.GetWinnerPlayerIds()) != 0 || draw.GetReason() != EndCompleted {
 		t.Fatalf("unexpected draw result: %v", draw)
+	}
+}
+
+func TestDecodeSetReadyRequest(t *testing.T) {
+	msg := encodeAndDecode(t, &pb.ClientMessage{
+		Sequence: 5,
+		Payload:  &pb.ClientMessage_SetReadyRequest{SetReadyRequest: &pb.SetReadyRequest{SessionId: "s1", Ready: true}},
+	})
+	if msg.Kind != KindSetReady || msg.Sequence != 5 || msg.SessionID != "s1" || !msg.Ready {
+		t.Fatalf("unexpected decode: %+v", msg)
+	}
+}
+
+func TestDecodeLegalActionsRequest(t *testing.T) {
+	msg := encodeAndDecode(t, &pb.ClientMessage{
+		Sequence: 6,
+		Payload:  &pb.ClientMessage_LegalActionsRequest{LegalActionsRequest: &pb.LegalActionsRequest{SessionId: "s1"}},
+	})
+	if msg.Kind != KindLegalActions || msg.Sequence != 6 || msg.SessionID != "s1" {
+		t.Fatalf("unexpected decode: %+v", msg)
+	}
+}
+
+func TestEncodeLegalActionsResponse(t *testing.T) {
+	resp := decodeServerMessage(t, EncodeLegalActionsResponse(6, "p1", []game.ActionSpec{
+		{Payload: []byte("e2e4"), Description: "pawn to e4"},
+		{Payload: []byte("g1f3")},
+	}))
+	if resp.GetInReplyTo() != 6 {
+		t.Fatalf("in_reply_to = %d, want 6", resp.GetInReplyTo())
+	}
+	l := resp.GetLegalActionsResponse()
+	if l.GetPlayerId() != "p1" || len(l.GetLegalActions()) != 2 {
+		t.Fatalf("unexpected legal actions response: %v", l)
+	}
+	if a := l.GetLegalActions()[0]; string(a.GetPayload()) != "e2e4" || a.GetDescription() != "pawn to e4" {
+		t.Fatalf("unexpected first action: %v", a)
+	}
+	if a := l.GetLegalActions()[1]; string(a.GetPayload()) != "g1f3" || a.GetDescription() != "" {
+		t.Fatalf("unexpected second action: %v", a)
+	}
+
+	empty := decodeServerMessage(t, EncodeLegalActionsResponse(7, "p1", nil)).GetLegalActionsResponse()
+	if empty == nil || len(empty.GetLegalActions()) != 0 {
+		t.Fatalf("expected an empty LegalActionsResponse, got %v", empty)
 	}
 }
