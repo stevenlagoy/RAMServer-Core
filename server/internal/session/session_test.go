@@ -9,9 +9,11 @@ import (
 	"github.com/stevenlagoy/ramserver-core/server/internal/testutil"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
+	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/chess"
 )
 
 // fakeSender records every frame a Session sends to one member
@@ -37,7 +39,7 @@ func (f *fakeSender) next(t *testing.T) *pb.ServerMessage {
 }
 
 // oneSeatGame allows a single player and nothing else
-type oneSeatGame struct{ game.StubGame }
+type oneSeatGame struct{ testgame.StubGame }
 
 func (g *oneSeatGame) Roles() []game.RoleSpec {
 	return []game.RoleSpec{{Name: game.RolePlayer, Min: 1, Max: 1}}
@@ -203,7 +205,7 @@ func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 // Joins refused by the session reach clients as ERROR_CODE_SESSION_NOT_JOINABLE. Tested here
 // because a match cannot yet be started over the protocol.
 func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
-	s, ctx := startSession(t, &game.StubGame{})
+	s, ctx := startSession(t, &testgame.StubGame{})
 	a := newFakeSender()
 	if err := s.Join(ctx, "a", "", 1, a); err != nil {
 		t.Fatal(err)
@@ -225,5 +227,48 @@ func TestFullLobbyIsNotJoinable(t *testing.T) {
 	var perr *transport.ProtocolError
 	if !errors.As(ErrLobbyFull, &perr) || perr.Code != transport.CodeSessionNotJoinable {
 		t.Fatalf("ErrLobbyFull has code %v, want CodeSessionNotJoinable", perr)
+	}
+}
+
+// Tests that a MatchResult is received in a real game implementation.
+func TestChessCheckmateEndsTheMatch(t *testing.T) {
+	s, ctx := startSession(t, &chess.Game{})
+	white, black := newFakeSender(), newFakeSender()
+	if err := s.Join(ctx, "white", "", 1, white); err != nil { // first to join plays white
+		t.Fatal(err)
+	}
+	if err := s.Join(ctx, "black", "", 1, black); err != nil {
+		t.Fatal(err)
+	}
+	s.SetReady(ctx, "white", true)
+	s.SetReady(ctx, "black", true)
+	for _, f := range []*fakeSender{white, black} {
+		for f.next(t).GetStateUpdate().GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
+		}
+	}
+
+	// Fool's mate: 1. f3 e5 2. g4 Qh4#
+	moves := []struct{ actor, uci string }{
+		{"white", "f2f3"}, {"black", "e7e5"}, {"white", "g2g4"}, {"black", "d8h4"},
+	}
+	for i, m := range moves {
+		seq := uint64(10 + i)
+		s.Submit(ctx, game.Action{ID: seq, ActorID: m.actor, Payload: []byte(m.uci)})
+		for _, f := range []*fakeSender{white, black} {
+			if got := f.next(t); got.GetStateUpdate() == nil {
+				t.Fatalf("move %s: expected a StateUpdate, got %v", m.uci, got)
+			}
+		}
+	}
+
+	for name, f := range map[string]*fakeSender{"white": white, "black": black} {
+		got := f.next(t)
+		result := got.GetMatchResult()
+		if result == nil || got.GetInReplyTo() != 0 {
+			t.Fatalf("%s: expected an unsolicited MatchResult after checkmate, got %v", name, got)
+		}
+		if result.GetDraw() || len(result.GetWinnerPlayerIds()) != 1 || result.GetWinnerPlayerIds()[0] != "black" {
+			t.Fatalf("%s: expected black to win, got %v", name, result)
+		}
 	}
 }

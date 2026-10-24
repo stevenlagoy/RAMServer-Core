@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stevenlagoy/ramserver-core/server/game"
+	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
@@ -63,14 +65,15 @@ func startTestServer(t *testing.T, cfg ServerConfig) (string, func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0") // port 0: OS picks a free port, so tests don't collide
 	if err != nil {
-		t.Fatalf("failed to start test listener: %v", err)
+		t.Fatal(err)
 	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		Serve(ctx, ln, cfg)
+		games := game.NewRegistry()
+		games.Register("stub", func() game.Game { return &testgame.StubGame{} })
+		Serve(ctx, ln, cfg, games)
 	}()
 	stop := func() {
 		cancel()
