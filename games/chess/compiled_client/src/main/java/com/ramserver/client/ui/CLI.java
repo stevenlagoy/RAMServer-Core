@@ -34,9 +34,21 @@ public class CLI implements Runnable {
             String args = parts.length > 1 ? parts[1] : "";
 
             switch (command) {
-                case "connect" -> client.connect(args);
+                case "connect" -> {
+                    if (args.isEmpty()) {
+                        System.out.println("Usage: connect <name>");
+                    } else {
+                        client.connect(args);
+                    }
+                }
                 case "create" -> client.createSession();
-                case "join" -> client.joinSession(args);
+                case "join" -> {
+                    if (args.isEmpty()) {
+                        System.out.println("Usage: join <session_id>");
+                    } else {
+                        client.joinSession(args);
+                    }
+                }
                 case "leave" -> client.leaveSession();
                 case "move" -> {
                     if (args.isEmpty()) {

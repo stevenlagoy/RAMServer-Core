@@ -1,6 +1,7 @@
 package com.ramserver.client.network;
 
 import com.google.protobuf.ByteString;
+import com.ramserver.client.ui.CLIRenderer;
 import org.ramserver.proto.v1.*;
 
 import java.io.*;
@@ -17,14 +18,7 @@ public class NetworkClient {
     private long sequenceNumber = 0;
 
     private String currentSessionId = "";
-    private long nextSequence = 1;
-    private volatile boolean authenticated = false;
-    private volatile String playerId = "";
-    private volatile String reconnectToken = "";
-    private volatile String sessionId = "";
-    private volatile long stateVersion = 0;
-    private volatile long pendingLeaveSequence = 0;
-    private volatile StateUpdate latestStateUpdate;
+    private String playerId = "";
 
     public NetworkClient(String host, int port) {
         this.host = host;
@@ -138,7 +132,6 @@ public class NetworkClient {
                 ServerMessage serverMessage = ServerMessage.parseFrom(payload);
                 trackSession(serverMessage);
                 logServerMessage(serverMessage);
-                handleServerMessage(serverMessage);
                 System.out.print("> ");
             }
         } catch (Exception e) {
@@ -156,78 +149,18 @@ public class NetworkClient {
 
         if (msg.hasConnectResponse()) kind = "CONNECTED";
         else if (msg.hasAuthResponse()) kind = "AUTHED";
-        else if (msg.hasStateUpdate()) kind = "STATE";
+        else if (msg.hasStateUpdate()) {
+            kind = "STATE";
+            StateUpdate stateUpdate = msg.getStateUpdate();
+            if (!stateUpdate.getEncodedView().isEmpty()) {
+                CLIRenderer.printBoard(stateUpdate.getEncodedView().toStringUtf8());
+            }
+        }
         else if (msg.hasErrorResponse()) kind = "ERROR";
         else if (msg.hasMatchResult()) kind = "RESULT";
         else if (msg.hasLeaveSessionResponse()) kind = "LEFT";
 
         System.out.println("\n[<- " + kind + "] " + body);
-    }
-
-    private void handleServerMessage(ServerMessage serverMessage) {
-        System.out.println("Response type: " + serverMessage.getPayloadCase()
-                + " | Reply to: " + serverMessage.getInReplyTo());
-
-        if (serverMessage.hasConnectResponse()) {
-            System.out.println("Handshake successful: "
-                    + serverMessage.getConnectResponse());
-
-        } else if (serverMessage.hasAuthResponse()) {
-            var response = serverMessage.getAuthResponse();
-
-            if (response.getPlayerId().isEmpty() ||
-                    response.getReconnectToken().isEmpty()) {
-                System.err.println("Invalid authentication response");
-                return;
-            }
-
-            playerId = response.getPlayerId();
-            reconnectToken = response.getReconnectToken();
-            sessionId = response.getSessionId();
-            authenticated = true;
-
-            System.out.println("Authentication successful!");
-            System.out.println("Player ID: " + playerId);
-
-            if (!sessionId.isEmpty()) {
-                System.out.println("Session ID: " + sessionId);
-            }
-
-        } else if (serverMessage.hasStateUpdate()) {
-
-            StateUpdate state = serverMessage.getStateUpdate();
-
-            // Store the complete authoritative snapshot
-            latestStateUpdate = state;
-
-            // Maintain our existing fields
-            sessionId = state.getSessionId();
-            stateVersion = state.getStateVersion();
-
-            // Display the updated state
-            printStateUpdate(state);
-
-        } else if (serverMessage.hasLeaveSessionResponse()) {
-            var response = serverMessage.getLeaveSessionResponse();
-
-            if (serverMessage.getInReplyTo() == pendingLeaveSequence
-                    && response.getSessionId().equals(sessionId)) {
-
-                System.out.println("Successfully left session: " + sessionId);
-
-                sessionId = "";
-                stateVersion = 0;
-                pendingLeaveSequence = 0;
-                latestStateUpdate = null;
-
-            } else {
-                System.out.println("Unexpected leave response received.");
-            }
-        } else if (serverMessage.hasErrorResponse()) {
-            System.out.println("Error response received: " + serverMessage.getErrorResponse());
-        } else {
-            System.out.println("Message received: " + serverMessage.getDescriptorForType().getFullName());
-        }
     }
 
     // Formerly sendActionRequest
@@ -239,48 +172,6 @@ public class NetworkClient {
                 .build();
 
         sendMessage(clientMsg);
-    }
-
-    private void printStateUpdate(StateUpdate state) {
-        System.out.println("Session ID: " + state.getSessionId());
-        System.out.println("Game: " + state.getGameId());
-        System.out.println("Status: " + state.getStatus());
-        System.out.println("State version: " + state.getStateVersion());
-
-        System.out.println("Players:");
-
-        for (var player : state.getPlayersList()) {
-            System.out.println(" - " + player.getDisplayName()
-                    + " (" + player.getPlayerId() + ")"
-                    + (player.getConnected() ? "" : " [Disconnected]"));
-        }
-
-        if (!state.getActivePlayerId().isEmpty()) {
-            String activePlayer = state.getActivePlayerId();
-
-            if (activePlayer.equals(playerId)) {
-                System.out.println("Current turn: You");
-            } else {
-                for (var player : state.getPlayersList()) {
-                    if (player.getPlayerId().equals(activePlayer)) {
-                        activePlayer = player.getDisplayName();
-                        break;
-                    }
-                }
-
-                System.out.println("Current turn: " + activePlayer);
-            }
-        }
-
-        if (!state.getPlayerOrderList().isEmpty()) {
-            System.out.println("Player order: "
-                    + state.getPlayerOrderList());
-        }
-
-        if (!state.getEncodedView().isEmpty()) {
-            System.out.println("Game state received: "
-                    + state.getEncodedView().size() + " bytes");
-        }
     }
 
     public void createSession() {
@@ -366,11 +257,8 @@ public class NetworkClient {
 
     public synchronized void disconnect() {
         connected = false;
-        authenticated = false;
-        pendingLeaveSequence = 0;
-        sessionId = "";
-        stateVersion = 0;
-        latestStateUpdate = null;
+        currentSessionId = "";
+
         try {
             if (socket != null && !socket.isClosed()) {
                 socket.close();
