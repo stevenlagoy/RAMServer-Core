@@ -8,7 +8,10 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/server"
+	"github.com/stevenlagoy/ramserver-core/server/internal/session"
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/chess"
 )
 
 const defaultAddr = "127.0.0.1:9000"
@@ -29,7 +32,11 @@ func main() {
 	// Context for coordinating shutdown; cancelled on SIGINT/SIGTERM
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if err := server.Serve(ctx, listener, server.DefaultConfig()); err != nil {
+	// Debug: enable AutoReady for new players
+	session.AutoReady = os.Getenv("RAMSERVER_AUTOREADY") != ""
+	games := game.NewRegistry()
+	games.Register("chess", func() game.Game { return &chess.Game{} })
+	if err := server.Serve(ctx, listener, server.DefaultConfig(), games); err != nil {
 		log.Fatal(err)
 	}
 }

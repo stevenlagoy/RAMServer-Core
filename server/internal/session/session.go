@@ -6,7 +6,7 @@ import (
 	"log"
 	"runtime/debug"
 
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/match"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
@@ -15,6 +15,9 @@ import (
 type Sender interface {
 	Send(message []byte)
 }
+
+// Automatically mark clients as ready, for testing
+var AutoReady bool
 
 // Once client's participation in a Session's lobby.
 type Member struct {
@@ -28,7 +31,7 @@ type Member struct {
 // One completed round for Session history and leaderboards
 type MatchResult struct {
 	Turns  int
-	Result game.Result
+	Result game.MatchResult
 }
 
 // Sole actor for everything that happens within: Run goroutine owns members,
@@ -208,9 +211,12 @@ func (s *Session) handleJoin(j *joinMsg) {
 	if _, exists := s.members[j.clientID]; !exists {
 		s.order = append(s.order, j.clientID) // only after the join is accepted, so a rejected joiner never gets a turn
 	}
-	s.members[j.clientID] = &Member{ClientID: j.clientID, DisplayName: j.displayName, Sender: j.sender, Role: role}
+	s.members[j.clientID] = &Member{ClientID: j.clientID, DisplayName: j.displayName, Sender: j.sender, Role: role, Ready: AutoReady}
 	j.reply <- nil
 	s.broadcastState(j.clientID, j.seq)
+	if AutoReady && s.readyToStart() { // Testing only: no ready message exists yet
+		s.startMatch()
+	}
 }
 
 // Picks the first role the game declares that still has room. Returns "" if every role is at capacity.
@@ -301,7 +307,7 @@ func (s *Session) handleSubmit(action game.Action) {
 	}
 }
 
-func (s *Session) endMatch(result game.Result) {
+func (s *Session) endMatch(result game.MatchResult) {
 	s.history = append(s.history, MatchResult{Turns: s.current.Turns, Result: result})
 	s.broadcastMatchEnded(result, s.current.Turns)
 	s.current = nil
@@ -360,12 +366,12 @@ func (s *Session) broadcastState(requesterID string, seq uint64) {
 	}
 }
 
-func (s *Session) broadcastMatchEnded(result game.Result, turns int) {
+func (s *Session) broadcastMatchEnded(result game.MatchResult, turns int) {
 	// TODO: per-player summaries from the action log, and end reasons other than completion
 	payload := transport.EncodeMatchResult(transport.MatchResult{
 		SessionID:       s.ID,
-		WinnerPlayerIDs: result.WinnerIDs,
-		Draw:            result.Draw,
+		WinnerPlayerIDs: result.GetWinnerIDs(),
+		Draw:            len(result.GetWinnerIDs()) == 0, // no winner means a draw
 		Reason:          transport.EndCompleted,
 	})
 	for _, m := range s.members {

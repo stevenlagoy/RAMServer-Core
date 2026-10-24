@@ -16,19 +16,22 @@ A Reusable Authoritative Multiplayer game server core. Game-agnostic server owns
 
 ## Repository Layout
 
-| Path                              | Contents                                                         |
-|-----------------------------------|------------------------------------------------------------------|
-| `proto/`                          | Wire protocol definitions (source of truth).                     |
-| `server/cmd/ramserver/`           | Primary server entry point. Run with `go run ./...`.             |
-| `server/cmd/leanclient/`          | Lightweight test client implementation. Run with `go run ./...`. |
-| `server/internal/`                | Go server code (`github.com/stevenlagoy/ramserver-core/server`). |
-| `games/chess/compiled_client/`    | Compiled-language chess client implementations.                  |
-| `games/chess/interpreted_client/` | Interpreted-language chess client implementations.               |
-| `games/gofish/client_1/`          | Go Fish client implementation.                                   |
-| `games/gofish/client_2/`          | Go Fish client implementation.                                   |
-| `games/tictactoe/client/`         | Tic-Tac-Toe client implementation by an LLM.                     |
-| `docs/`                           | Team documentation for project management and communication.     |
-| `scripts/`                        | Developer convenience scripts                                    |
+| Path                                | Contents                                                             |
+|-------------------------------------|----------------------------------------------------------------------|
+| `proto/`                            | Wire protocol definitions (source of truth)                          |
+| `server/cmd/ramserver/`             | Primary server entry point. Run with `go run ./...`                  |
+| `server/cmd/leanclient/`            | Lightweight test client implementation. Run with `go run ./...`      |
+| `server/internal/`                  | Go server code (`github.com/stevenlagoy/ramserver-core/server`)      |
+| `server/game/`                      | Game interface for any ruleset running on RAMServer-Core             |
+| `server/rulesets/`                  | Implementations of the Game interface                                |
+| `server/rulesets/chess/`            | Ruleset for chess implementing the Game interface                    |
+| `clients/chess/compiled_client/`    | Compiled-language chess client implementation in Java and Kotlin     |
+| `clients/chess/interpreted_client/` | Interpreted-language chess client implementation in Python           |
+| `clients/gofish/systems_client/`    | Systems-language Go Fish client implementation in C and C++          |
+| `clients/gofish/web_client/`        | Web-based Go Fish client implementation in JavaScript and TypeScript |
+| `clients/tictactoe/client/`         | Tic-Tac-Toe client implementation by an LLM                          |
+| `docs/`                             | Team documentation for project management and communication          |
+| `scripts/`                          | Developer convenience scripts                                        |
 
 ## Prerequisites
 
@@ -133,20 +136,11 @@ go test -race ./...
 If PowerShell blocks any script, run:
 `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
 
-`leanclients.ps1 [count] [leanclient flags...]` opens one pane per client, named Player1 to PlayerN, and passes any extra flags (such as `-addr`) to every client. The server allows 4 connections per IP address by default (`MaxConnectionsOneIP`), so more than 4 local clients are refused.
-
-## Branches
-
-| Branch     | Owners   | Scope                           |
-|------------|----------|---------------------------------|
-| `main`     | All four | Protected; requires 4 approvals |
-| `server`   | All four | `server/`, `proto/`             |
-| `client-1` | Pair TBD | `clients/client-1/`             |
-| `client-2` | Pair TBD | `clients/client-2/`             |
-
-Rebase your branch onto `main` before opening a pull request.
-
 ## Documentation
 
 - [Wire protocol specification](docs/protocol.md)
 - [Contributing guidelines](CONTRIBUTING.md)
+- [Project Proposal](docs/PROJECT-PROPOSAL.md)
+- [Team Policies](docs/TEAM-POLICIES.md)
+- [Requirements Specification](docs/REQUIREMENTS-SPECIFICATION.md)
+- [Chess Ruleset](server/rulesets/chess/README.md)
