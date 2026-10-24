@@ -39,6 +39,19 @@ public class CLI implements Runnable {
                 case "action" -> client.sendActionRequest(args);
                 case "ping" -> client.sendPing();
                 case "disconnect" -> client.disconnect();
+                case "create" -> client.sendJoinSessionRequest(args, "");
+
+                case "join" -> {
+                    String[] joinArgs = args.trim().split("\\s+", 2);
+
+                    if (joinArgs.length < 2) {
+                        System.out.println("Usage: join <gameId> <sessionId>");
+                    } else {
+                        client.sendJoinSessionRequest(joinArgs[0], joinArgs[1]);
+                    }
+                }
+                case "leave" -> client.sendLeaveSessionRequest();
+                case "status" -> client.printSessionStatus();
             }
         }
     }
