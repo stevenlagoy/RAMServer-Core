@@ -34,10 +34,17 @@ public class CLI implements Runnable {
             String args = parts.length > 1 ? parts[1] : "";
 
             switch (command) {
-                case "connect" -> client.connect();
-                case "auth" -> client.sendAuthRequest(args);
-                case "action" -> client.sendActionRequest(args);
-                case "ping" -> client.sendPing();
+                case "connect" -> client.connect(args);
+                case "create" -> client.createSession();
+                case "join" -> client.joinSession(args);
+                case "leave" -> client.leaveSession();
+                case "move" -> {
+                    if (args.isEmpty()) {
+                        System.out.println("Usage: move <notation>");
+                    } else {
+                        client.sendMove(args);
+                    }
+                }
                 case "disconnect" -> client.disconnect();
             }
         }

@@ -1,12 +1,11 @@
 package com.ramserver.client.network;
 
-import org.ramserver.proto.v1.ActionRequest;
-import org.ramserver.proto.v1.AuthRequest;
-import org.ramserver.proto.v1.ClientMessage;
-import org.ramserver.proto.v1.ServerMessage;
+import com.google.protobuf.ByteString;
+import org.ramserver.proto.v1.*;
 
 import java.io.*;
 import java.net.Socket;
+import java.util.Arrays;
 
 public class NetworkClient {
     private final String host;
@@ -15,13 +14,16 @@ public class NetworkClient {
     private OutputStream outputStream;
     private InputStream inputStream;
     private boolean connected = false;
+    private long sequenceNumber = 0;
+
+    private String currentSessionId = "";
 
     public NetworkClient(String host, int port) {
         this.host = host;
         this.port = port;
     }
 
-    public synchronized void connect() {
+    public synchronized void connect(String name) {
         if (connected) {
             System.out.println("Already connected");
             return;
@@ -34,6 +36,8 @@ public class NetworkClient {
             connected = true;
             System.out.println("Connected to " + host + ":" + port);
 
+            performHandshake(name);
+
             Thread listeningThread = new Thread(this::listenForServerMessages);
             listeningThread.setDaemon(true);
             listeningThread.start();
@@ -42,14 +46,90 @@ public class NetworkClient {
         }
     }
 
+    private void performHandshake(String name) throws IOException {
+        sequenceNumber++;
+        ConnectRequest connectRequest =
+                ConnectRequest.newBuilder()
+                        .setProtocolVersion("1.0")
+                        .setClientName("java-client")
+                        .build();
+
+        ClientMessage clientMessage = ClientMessage.newBuilder().setSequence(sequenceNumber).setConnectRequest(connectRequest).build();
+
+        byte[] data = clientMessage.toByteArray();
+        sendFrame(data);
+        System.out.println("Waiting for server response...");
+
+        ServerMessage connResponse = readSync();
+        if (connResponse == null || connResponse.hasErrorResponse()) {
+            throw new IOException(connResponse.getErrorResponse().toString());
+        }
+        System.out.println("Received server connect response");
+
+        sequenceNumber++;
+        AuthRequest authRequest = AuthRequest.newBuilder().setDisplayName(name).build();
+        ClientMessage authMessage = ClientMessage.newBuilder().setSequence(sequenceNumber).setAuthRequest(authRequest).build();
+
+        sendFrame(authMessage.toByteArray());
+        System.out.println("Sending auth request");
+
+        ServerMessage authResponse = readSync();
+        if (authResponse == null || authResponse.hasErrorResponse()) {
+            throw new IOException(authResponse.getErrorResponse().toString());
+        }
+        System.out.println("Received server auth response");
+    }
+
+    private ServerMessage readSync() throws IOException {
+        byte[] header = new byte[4];
+        int bytesRead = inputStream.readNBytes(header, 0, 4);
+        if (bytesRead < 4) return null;
+
+        int length = ((header[0] & 0xFF) << 24
+                | ((header[1] & 0xFF) << 16)
+                | ((header[2] & 0xFF) << 8)
+                | (header[3] & 0xFF)
+        );
+
+        if (length == 0) {
+            sendFrame(new byte[0]);
+            return readSync();
+        }
+
+        byte[] payload = inputStream.readNBytes(length);
+        return ServerMessage.parseFrom(payload);
+    }
+
     private void listenForServerMessages() {
         try {
             while (connected && !socket.isClosed()) {
-                ServerMessage serverMessage = ServerMessage.parseDelimitedFrom(inputStream);
-                if (serverMessage == null) {
-                    System.out.println("Connection closed");
+                byte[] header = new byte[4];
+                int bytesRead = inputStream.readNBytes(header, 0, 4);
+                if (bytesRead < 4) {
+                    System.out.println("Connection closed by server");
                     break;
                 }
+
+                int length = ((header[0] & 0xFF) << 24
+                        | ((header[1] & 0xFF) << 16)
+                        | ((header[2] & 0xFF) << 8)
+                        | (header[3] & 0xFF)
+                );
+
+                if (length == 0) {
+                    sendFrame(new byte[0]);
+                    continue;
+                }
+
+                byte[] payload = inputStream.readNBytes(length);
+                if (payload.length < length) {
+                    System.out.println("Connection closed during read");
+                    break;
+                }
+
+                ServerMessage serverMessage = ServerMessage.parseFrom(payload);
+                trackSession(serverMessage);
+                logServerMessage(serverMessage);
                 handleServerMessage(serverMessage);
                 System.out.print("> ");
             }
@@ -62,59 +142,99 @@ public class NetworkClient {
         }
     }
 
+    private void logServerMessage(ServerMessage msg) {
+        String kind = "UNKNOWN";
+        String body = msg.toString().replace("\n", " ");
+
+        if (msg.hasConnectResponse()) kind = "CONNECTED";
+        else if (msg.hasAuthResponse()) kind = "AUTHED";
+        else if (msg.hasStateUpdate()) kind = "STATE";
+        else if (msg.hasErrorResponse()) kind = "ERROR";
+        else if (msg.hasMatchResult()) kind = "RESULT";
+        else if (msg.hasLeaveSessionResponse()) kind = "LEFT";
+
+        System.out.println("\n[<- " + kind + "] " + body);
+    }
+
     private void handleServerMessage(ServerMessage serverMessage) {
-        if (serverMessage.hasAuthResponse()) {
-            System.out.println("Auth response received: " + serverMessage.getAuthResponse());
-        } else if (serverMessage.hasStateUpdate()) {
+        if (serverMessage.hasStateUpdate()) {
             System.out.println("State update received: " + serverMessage.getStateUpdate());
         } else if (serverMessage.hasErrorResponse()) {
             System.out.println("Error response received: " + serverMessage.getErrorResponse());
         } else {
-            System.out.println("Message received");
+            System.out.println("Message received: " + serverMessage.getDescriptorForType().getFullName());
         }
     }
 
-    public void sendAuthRequest(String name) {
+    // Formerly sendActionRequest
+    public void sendMove(String uciMove) {
         if (!checkConnection()) return;
 
         ClientMessage clientMsg = ClientMessage.newBuilder()
-                .setAuthRequest(AuthRequest.newBuilder().build())
+                .setActionRequest(ActionRequest.newBuilder().setSessionId(currentSessionId).setEncodedAction(ByteString.copyFromUtf8(uciMove)).build())
                 .build();
 
         sendMessage(clientMsg);
     }
 
-    public void sendActionRequest(String action) {
+    public void createSession() {
         if (!checkConnection()) return;
-
-        ClientMessage clientMsg = ClientMessage.newBuilder()
-                .setActionRequest(ActionRequest.newBuilder().build())
-                .build();
-
-        sendMessage(clientMsg);
-    }
-
-    public boolean sendPing() {
         try {
-            socket.getOutputStream().write("PING\n".getBytes());
-            socket.getOutputStream().flush();
-
-            socket.setSoTimeout(2000);
-
-            BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            String response = reader.readLine();
-            return "PONG".equalsIgnoreCase(response);
-        } catch (IOException e) {
-            System.err.println("Ping error: " + e.getMessage());
-            return false;
+            sequenceNumber++;
+            ClientMessage createMessage = ClientMessage.newBuilder().setJoinSessionRequest(JoinSessionRequest.newBuilder().setGameId("chess").build()).build();
+            sendMessage(createMessage);
+        } catch (Exception e) {
+            System.err.println("Error creating session");
         }
+    }
+
+    public void joinSession(String sessionId) {
+        if (!checkConnection()) return;
+        try {
+            sequenceNumber++;
+            ClientMessage createMessage = ClientMessage.newBuilder().setJoinSessionRequest(JoinSessionRequest.newBuilder().setGameId("chess").setSessionId(sessionId).build()).build();
+            sendMessage(createMessage);
+        } catch (Exception e) {
+            System.err.println("Error joining session");
+        }
+    }
+
+    public void leaveSession() {
+        if (!checkConnection() || currentSessionId.isEmpty()) return;
+
+        try {
+            sequenceNumber++;
+            ClientMessage createMessage = ClientMessage.newBuilder().setLeaveSessionRequest(LeaveSessionRequest.newBuilder().setSessionId(currentSessionId).build()).build();
+            sendMessage(createMessage);
+        } catch (Exception e) {
+            System.err.println("Error leaving session");
+        }
+    }
+
+    private synchronized void sendFrame(byte[] payload) throws IOException {
+        if (payload.length > 65536) {
+            throw new IOException("Frame too large");
+        }
+
+        byte[] frame = new byte[4 + payload.length];
+        frame[0] = (byte) ((payload.length >> 24) & 0xFF);
+        frame[1] = (byte) ((payload.length >> 16) & 0xFF);
+        frame[2] = (byte) ((payload.length >> 8) & 0xFF);
+        frame[3] = (byte) (payload.length & 0xFF);
+        System.arraycopy(payload, 0, frame, 4, payload.length);
+        outputStream.write(frame);
+        outputStream.flush();
     }
 
     private synchronized void sendMessage(ClientMessage clientMsg) {
         try {
-            clientMsg.writeDelimitedTo(outputStream);
-            outputStream.flush();
-            System.out.println("Sent message: " + clientMsg);
+            sequenceNumber++;
+            ClientMessage finalMsg = clientMsg.toBuilder()
+                    .setSequence(sequenceNumber)
+                    .build();
+            byte[] payload = finalMsg.toByteArray();
+            sendFrame(payload);
+            System.out.println("Sent message: " + finalMsg);
         } catch (Exception e) {
             System.err.println("Error sending message: " + clientMsg);
         }
@@ -126,6 +246,16 @@ public class NetworkClient {
             return false;
         }
         return true;
+    }
+
+    private synchronized void trackSession(ServerMessage serverMessage) {
+        if (serverMessage.hasStateUpdate()) {
+            currentSessionId = serverMessage.getStateUpdate().getSessionId();
+        } else if (serverMessage.hasLeaveSessionResponse()) {
+            if (serverMessage.getLeaveSessionResponse().getSessionId().equals(currentSessionId)) {
+                currentSessionId = "";
+            }
+        }
     }
 
     public synchronized void disconnect() {
