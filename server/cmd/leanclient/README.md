@@ -39,12 +39,14 @@ raw hello
 | `join <game_id> <session_id>`           | `JoinSessionRequest`  | `session_id` should match an existing session.                                           |
 | `leave [session_id]`                    | `LeaveSessionRequest` | Defaults to the current session.                                                         |
 | `action <payload>`                      | `ActionRequest`       | Targets the current session. The rest of the line is sent as the `encoded_action` bytes. |
+| `ready [true\|false]`                   | `SetReadyRequest`     | Marks you ready (default) or not ready in the current session.                           |
+| `legal`                                 | `LegalActionsRequest` | Lists the actions you may take right now in the current session.                         |
 | `raw <text>`                            | arbitrary frame       | Sends the text as an arbitary frame, not protobuf. Useful for testing malformed input.   |
 | `help`                                  | n/a                   | Lists the commands.                                                                      |
 
 The client numbers each message's `sequence` automatically. It remembers the current session from the last `StateUpdate` it received, and forgets it after a `LeaveSessionResponse`.
 
-Matches cannot be started over the protocol yet, so `action` is currently dropped by the server after joining a session.
+A match starts once every player has sent `ready` (for chess, both players). Until then, `action` has no effect.
 
 ## Run one command
 
