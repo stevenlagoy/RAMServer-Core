@@ -54,7 +54,7 @@ func TestSessionPipeline_JoinReadyLeave(t *testing.T) {
 	ownerSender := &testutil.MockSender{}
 	clientSender := &testutil.MockSender{}
 
-	g := testutil.MockGame{}
+	g := &testgame.StubGame{}
 
 	sess := NewSession("session-1", "TestGame", g, true)
 
@@ -142,7 +142,7 @@ func TestSessionJoin_RejectFull(t *testing.T) {
 	clientSender := &testutil.MockSender{}
 	rejectSender := &testutil.MockSender{}
 
-	g := testutil.MockGame{}
+	g := &testgame.StubGame{}
 
 	sess := NewSession("session-1", "TestGame", g, true)
 
