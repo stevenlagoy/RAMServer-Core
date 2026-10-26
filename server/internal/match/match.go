@@ -59,8 +59,8 @@ func (m *Match) Outcome() (game.MatchResult, bool) {
 	return m.Game.Outcome(m.State)
 }
 
-// Returns memberID's view of the current state
-func (m *Match) ViewFor(memberID string) any {
+// Returns memberID's view of the current state, encoded by the game
+func (m *Match) ViewFor(memberID string) []byte {
 	return m.Game.ViewFor(m.State, memberID)
 }
 

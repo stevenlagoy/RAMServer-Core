@@ -144,3 +144,61 @@ func TestChessCheckmateEndsTheMatch(t *testing.T) {
 		}
 	}
 }
+
+// secretGame shows each member only their own secret, like a hand of cards
+type secretGame struct{ testgame.StubGame }
+
+func (g *secretGame) ViewFor(_ game.GameState, memberID string) []byte {
+	return []byte("secret-of-" + memberID)
+}
+
+// startMatch joins each id, readies everyone, and returns each member's sender and first in-progress StateUpdate
+func startMatch(t *testing.T, s *Session, ctx context.Context, ids ...string) (map[string]*fakeSender, map[string]*pb.StateUpdate) {
+	t.Helper()
+	senders := make(map[string]*fakeSender, len(ids))
+	for _, id := range ids {
+		senders[id] = newFakeSender()
+		if err := s.Join(ctx, id, "", 1, senders[id]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range ids {
+		s.SetReady(ctx, id, true)
+	}
+	started := make(map[string]*pb.StateUpdate, len(ids))
+	for id, f := range senders {
+		for started[id].GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
+			started[id] = f.next(t).GetStateUpdate()
+		}
+	}
+	return senders, started
+}
+
+func TestEachMemberReceivesOnlyTheirOwnView(t *testing.T) {
+	s, ctx := startSession(t, &secretGame{})
+	_, started := startMatch(t, s, ctx, "a", "b")
+	for id, state := range started {
+		if got, want := string(state.GetEncodedView()), "secret-of-"+id; got != want {
+			t.Fatalf("%s's encoded_view = %q, want %q", id, got, want)
+		}
+	}
+}
+
+func TestChessViewIsTheCurrentPosition(t *testing.T) {
+	const startFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+	s, ctx := startSession(t, &chess.Game{})
+	senders, started := startMatch(t, s, ctx, "white", "black") // first to join plays white
+	for id, state := range started {
+		if got := string(state.GetEncodedView()); got != startFEN {
+			t.Fatalf("%s's starting view = %q, want %q", id, got, startFEN)
+		}
+	}
+
+	s.Submit(ctx, game.Action{ID: 5, ActorID: "white", Payload: []byte("e2e4")})
+	const afterE4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+	for _, f := range senders {
+		if got := string(f.next(t).GetStateUpdate().GetEncodedView()); got != afterE4 {
+			t.Fatalf("view after e2e4 = %q, want %q", got, afterE4)
+		}
+	}
+}
