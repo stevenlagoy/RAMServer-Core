@@ -6,6 +6,11 @@ import (
 	"github.com/stevenlagoy/ramserver-core/server/game"
 )
 
+// The stub's own MatchResult type. Returning it instead of a plain game.Result means every test using
+// the stub checks that the core only relies on the MatchResult interface, as real games like chess
+// return their own result types
+type Result struct{ game.Result }
+
 // Placeholder game to exercise the server
 type StubGame struct {
 	EndAfter int // How many actions end the match; defaults to 4
@@ -70,9 +75,9 @@ func (g *StubGame) ActiveTurn(state game.GameState) []string {
 func (g *StubGame) Outcome(state game.GameState) (game.MatchResult, bool) {
 	s := state.(stubState)
 	if s.applied >= s.endAfter {
-		return game.Result{}, true
+		return Result{}, true // a draw: no winners
 	}
-	return game.Result{}, false
+	return Result{}, false
 }
 
 func (g *StubGame) ReadyToStart(roster map[string]game.Role, ready map[string]bool) bool {

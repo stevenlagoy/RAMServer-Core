@@ -16,9 +16,6 @@ type Sender interface {
 	Send(message []byte)
 }
 
-// Automatically mark clients as ready, for testing
-var AutoReady bool
-
 // Once client's participation in a Session's lobby.
 type Member struct {
 	ClientID    string
@@ -213,12 +210,9 @@ func (s *Session) handleJoin(j *joinMsg) {
 	if _, exists := s.members[j.clientID]; !exists {
 		s.order = append(s.order, j.clientID) // only after the join is accepted, so a rejected joiner never gets a turn
 	}
-	s.members[j.clientID] = &Member{ClientID: j.clientID, DisplayName: j.displayName, Sender: j.sender, Role: role, Ready: AutoReady}
+	s.members[j.clientID] = &Member{ClientID: j.clientID, DisplayName: j.displayName, Sender: j.sender, Role: role}
 	j.reply <- nil
 	s.broadcastState(j.clientID, j.seq)
-	if AutoReady && s.readyToStart() { // Testing only: start without SetReadyRequests
-		s.startMatch("", 0)
-	}
 }
 
 // Picks the first role the game declares that still has room. Returns "" if every role is at capacity.

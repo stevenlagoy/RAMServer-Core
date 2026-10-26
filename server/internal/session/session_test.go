@@ -12,7 +12,6 @@ import (
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
 	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
-	"github.com/stevenlagoy/ramserver-core/server/rulesets/chess"
 )
 
 // fakeSender records every frame a Session sends to one member
@@ -102,45 +101,41 @@ func TestFullLobbyIsNotJoinable(t *testing.T) {
 	}
 }
 
-// Tests that a MatchResult is received in a real game implementation.
-func TestChessCheckmateEndsTheMatch(t *testing.T) {
-	s, ctx := startSession(t, &chess.Game{})
-	white, black := newFakeSender(), newFakeSender()
-	if err := s.Join(ctx, "white", "", 1, white); err != nil { // first to join plays white
+// The stub ends after four actions with its own result type, which the core must pass on through the
+// MatchResult interface rather than asserting a concrete type
+func TestMatchEndBroadcastsMatchResult(t *testing.T) {
+	s, ctx := startSession(t, &testgame.StubGame{})
+	a, b := newFakeSender(), newFakeSender()
+	if err := s.Join(ctx, "a", "", 1, a); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Join(ctx, "black", "", 1, black); err != nil {
+	if err := s.Join(ctx, "b", "", 1, b); err != nil {
 		t.Fatal(err)
 	}
-	s.SetReady(ctx, "white", true, 2)
-	s.SetReady(ctx, "black", true, 2)
-	for _, f := range []*fakeSender{white, black} {
+	s.SetReady(ctx, "a", true, 2)
+	s.SetReady(ctx, "b", true, 2)
+	for _, f := range []*fakeSender{a, b} {
 		for f.next(t).GetStateUpdate().GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
 		}
 	}
 
-	// Fool's mate: 1. f3 e5 2. g4 Qh4#
-	moves := []struct{ actor, uci string }{
-		{"white", "f2f3"}, {"black", "e7e5"}, {"white", "g2g4"}, {"black", "d8h4"},
-	}
-	for i, m := range moves {
-		seq := uint64(10 + i)
-		s.Submit(ctx, game.Action{ID: seq, ActorID: m.actor, Payload: []byte(m.uci)})
-		for _, f := range []*fakeSender{white, black} {
+	for i, actor := range []string{"a", "b", "a", "b"} { // the stub alternates turns in join order
+		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: actor, Payload: []byte("NoOp")})
+		for _, f := range []*fakeSender{a, b} {
 			if got := f.next(t); got.GetStateUpdate() == nil {
-				t.Fatalf("move %s: expected a StateUpdate, got %v", m.uci, got)
+				t.Fatalf("action %d: expected a StateUpdate, got %v", i, got)
 			}
 		}
 	}
 
-	for name, f := range map[string]*fakeSender{"white": white, "black": black} {
+	for name, f := range map[string]*fakeSender{"a": a, "b": b} {
 		got := f.next(t)
 		result := got.GetMatchResult()
 		if result == nil || got.GetInReplyTo() != 0 {
-			t.Fatalf("%s: expected an unsolicited MatchResult after checkmate, got %v", name, got)
+			t.Fatalf("%s: expected an unsolicited MatchResult, got %v", name, got)
 		}
-		if result.GetDraw() || len(result.GetWinnerPlayerIds()) != 1 || result.GetWinnerPlayerIds()[0] != "black" {
-			t.Fatalf("%s: expected black to win, got %v", name, result)
+		if !result.GetDraw() || len(result.GetWinnerPlayerIds()) != 0 {
+			t.Fatalf("%s: expected a draw, got %v", name, result)
 		}
 	}
 }
