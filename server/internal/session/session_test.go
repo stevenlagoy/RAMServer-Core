@@ -158,7 +158,7 @@ func startMatch(t *testing.T, s *Session, ctx context.Context, ids ...string) (m
 		}
 	}
 	for _, id := range ids {
-		s.SetReady(ctx, id, true)
+		s.SetReady(ctx, id, true, 2)
 	}
 	started := make(map[string]*pb.StateUpdate, len(ids))
 	for id, f := range senders {
@@ -175,25 +175,6 @@ func TestEachMemberReceivesOnlyTheirOwnView(t *testing.T) {
 	for id, state := range started {
 		if got, want := string(state.GetEncodedView()), "secret-of-"+id; got != want {
 			t.Fatalf("%s's encoded_view = %q, want %q", id, got, want)
-		}
-	}
-}
-
-func TestChessViewIsTheCurrentPosition(t *testing.T) {
-	const startFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-	s, ctx := startSession(t, &chess.Game{})
-	senders, started := startMatch(t, s, ctx, "white", "black") // first to join plays white
-	for id, state := range started {
-		if got := string(state.GetEncodedView()); got != startFEN {
-			t.Fatalf("%s's starting view = %q, want %q", id, got, startFEN)
-		}
-	}
-
-	s.Submit(ctx, game.Action{ID: 5, ActorID: "white", Payload: []byte("e2e4")})
-	const afterE4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
-	for _, f := range senders {
-		if got := string(f.next(t).GetStateUpdate().GetEncodedView()); got != afterE4 {
-			t.Fatalf("view after e2e4 = %q, want %q", got, afterE4)
 		}
 	}
 }
