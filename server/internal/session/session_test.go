@@ -139,6 +139,32 @@ func TestMatchEndBroadcastsMatchResult(t *testing.T) {
 	}
 }
 
+func TestLeaveOfLastUnreadyMemberStartsMatch(t *testing.T) {
+	s, ctx := startSession(t, &testgame.StubGame{})
+	senders := map[string]*fakeSender{"a": newFakeSender(), "b": newFakeSender(), "c": newFakeSender()}
+	for _, id := range []string{"a", "b", "c"} {
+		if err := s.Join(ctx, id, "", 1, senders[id]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.SetReady(ctx, "a", true, 2)
+	s.SetReady(ctx, "b", true, 2)
+	s.Leave(ctx, "c")
+
+	for _, id := range []string{"a", "b"} {
+		var got *pb.ServerMessage
+		for got.GetStateUpdate().GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
+			got = senders[id].next(t) // fails if the match never starts
+		}
+		if got.GetInReplyTo() != 0 {
+			t.Fatalf("%s: expected an unsolicited start, got %v", id, got)
+		}
+		if order := got.GetStateUpdate().GetPlayerOrder(); len(order) != 2 || order[0] != "a" || order[1] != "b" {
+			t.Fatalf("%s: player_order = %v, want [a b]", id, order)
+		}
+	}
+}
+
 // secretGame shows each member only their own secret, like a hand of cards
 type secretGame struct{ testgame.StubGame }
 

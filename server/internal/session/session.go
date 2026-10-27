@@ -243,6 +243,10 @@ func (s *Session) handleLeave(l *leaveMsg) {
 	if len(s.members) == 0 {
 		return // caller removes Session from store
 	}
+	if s.current == nil && s.readyToStart() {
+		s.startMatch("", 0) // the leaver was the last member not ready
+		return
+	}
 	s.broadcastUnsolicitedState()
 }
 
