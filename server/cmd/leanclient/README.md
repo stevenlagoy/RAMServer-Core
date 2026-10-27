@@ -4,6 +4,13 @@
 
 Run these commands from the `server` directory, with a server running (`go run ./cmd/ramserver` or Docker Compose).
 
+The examples use the `stub` test game, which the server only registers when `RAMSERVER_STUB_GAME` is set:
+
+```bash
+RAMSERVER_STUB_GAME=1 go run ./cmd/ramserver
+RAMSERVER_STUB_GAME=1 docker compose up --build   # from the repository root
+```
+
 ## Interactive mode
 
 ```bash
