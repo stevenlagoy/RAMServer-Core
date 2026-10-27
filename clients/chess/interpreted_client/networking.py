@@ -6,7 +6,7 @@ from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.json_format import MessageToJson
 from dataclasses import dataclass
 
-import gen.ramserver.v1.ramserver_pb2  
+import gen.ramserver.v1.ramserver_pb2
 
 from piece import PlayerColor
 from move import Move
@@ -32,19 +32,19 @@ def connect() -> socket.socket:
         # Start a persistent background thread to listen and print server responses
         listener_thread = threading.Thread(target=listen_and_print_server_messages, args=(sock,), daemon=True)
         listener_thread.start()
-        
+
         client_msg = ClientMessage()
-        client_msg.connect_request.protocol_version = "1.0"
+        client_msg.connect_request.protocol_version = "1.1"
         client_msg.connect_request.client_name = "python-chess"
         send_msg(sock, client_msg)
-        
+
         return sock
     except ConnectionRefusedError as e:
         raise ConnectionRefusedError(f"Connection refused. Is the server listening on port {PORT}?") from e
 
 def authenticate(sock: socket.socket):
     client_msg = ClientMessage()
-    client_msg.auth_request.display_name = "Python-Chess"    
+    client_msg.auth_request.display_name = "Python-Chess"
     send_msg(sock, client_msg)
 
 def join_chess(sock: socket.socket, session_id: str | None = None):
@@ -137,15 +137,15 @@ def listen_and_print_server_messages(sock: socket.socket):
 
             if server_msg.error_response is not None:
                 recent_state = last_good_state
-                    
+
             # Heartbeat
             if server_msg == ServerMessage():
                 ping(sock)
 
             readable_json = MessageToJson(server_msg, preserving_proto_field_name=True)
-            
+
             if not SILENT: print(f"<- {readable_json}")
-            
+
     except Exception as e:
         print(f"\n[Network Error] Error in listener loop: {e}")
 
