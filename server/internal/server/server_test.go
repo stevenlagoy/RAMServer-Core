@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -73,6 +74,7 @@ func startTestServer(t *testing.T, cfg ServerConfig) (string, func()) {
 		defer close(done)
 		games := game.NewRegistry()
 		games.Register("stub", func() game.Game { return &testgame.StubGame{} })
+		games.Register("stub-solo", func() game.Game { return &testgame.StubGame{MaxPlayers: 1} })
 		Serve(ctx, ln, cfg, games)
 	}()
 	stop := func() {
@@ -173,6 +175,21 @@ func expectMessage(t *testing.T, conn net.Conn, r *bufio.Reader) *pb.ServerMessa
 		t.Fatalf("response is not a ServerMessage: %v", err)
 	}
 	return &msg
+}
+
+// expectNoMessage fails if a non-heartbeat frame arrives within 100ms
+func expectNoMessage(t *testing.T, conn net.Conn, r *bufio.Reader) {
+	t.Helper()
+	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	frame, err := readNonHeartbeatFrame(t, conn, r)
+	if err == nil {
+		var msg pb.ServerMessage
+		proto.Unmarshal(frame, &msg)
+		t.Fatalf("expected no message, got %v", &msg)
+	}
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("expected a read timeout, got %v", err)
+	}
 }
 
 // authenticate dials addr and completes Connect and Auth, returning the connection, its reader, and the issued player_id
@@ -438,22 +455,24 @@ func TestPlayerCannotJoinTwoSessions(t *testing.T) {
 	alice, aliceR, _ := authenticate(t, addr, "Alice")
 	bob, bobR, _ := authenticate(t, addr, "Bob")
 	aliceSession := createSession(t, alice, aliceR, 3)
+	sendMessage(t, alice, readyRequest(4, aliceSession, true)) // a started session isn't joinable, so Bob gets his own
+	expectState(t, alice, aliceR, 4, pb.SessionStatus_SESSION_STATUS_IN_PROGRESS)
 	bobSession := createSession(t, bob, bobR, 3)
 
-	sendMessage(t, alice, joinRequest(4, "stub", ""))
-	expectError(t, alice, aliceR, 4, pb.ErrorCode_ERROR_CODE_ALREADY_IN_SESSION)
-	sendMessage(t, alice, joinRequest(5, "stub", bobSession))
+	sendMessage(t, alice, joinRequest(5, "stub", ""))
 	expectError(t, alice, aliceR, 5, pb.ErrorCode_ERROR_CODE_ALREADY_IN_SESSION)
+	sendMessage(t, alice, joinRequest(6, "stub", bobSession))
+	expectError(t, alice, aliceR, 6, pb.ErrorCode_ERROR_CODE_ALREADY_IN_SESSION)
 
-	sendMessage(t, alice, leaveRequest(6, bobSession)) // a session Alice is not a member of
-	expectError(t, alice, aliceR, 6, pb.ErrorCode_ERROR_CODE_NOT_IN_SESSION)
+	sendMessage(t, alice, leaveRequest(7, bobSession)) // a session Alice is not a member of
+	expectError(t, alice, aliceR, 7, pb.ErrorCode_ERROR_CODE_NOT_IN_SESSION)
 	sendMessage(t, alice, &pb.ClientMessage{
-		Sequence: 7,
+		Sequence: 8,
 		Payload:  &pb.ClientMessage_ActionRequest{ActionRequest: &pb.ActionRequest{SessionId: bobSession, EncodedAction: []byte("move")}},
 	})
-	expectError(t, alice, aliceR, 7, pb.ErrorCode_ERROR_CODE_NOT_IN_SESSION)
+	expectError(t, alice, aliceR, 8, pb.ErrorCode_ERROR_CODE_NOT_IN_SESSION)
 
-	sendMessage(t, alice, leaveRequest(8, aliceSession)) // still a member of her own session
+	sendMessage(t, alice, leaveRequest(9, aliceSession)) // still a member of her own session
 	if resp := expectMessage(t, alice, aliceR); resp.GetLeaveSessionResponse() == nil {
 		t.Fatalf("expected Alice to still be in her own session, got %v", resp)
 	}
@@ -618,4 +637,44 @@ func TestJoinWithoutSessionIDJoinsOpenSession(t *testing.T) {
 	if players := state.GetPlayers(); len(players) != 2 || players[0].GetPlayerId() != aliceID || players[1].GetPlayerId() != bobID {
 		t.Fatalf("expected both players to be in state update broadcast: %v", state)
 	}
+	expectNoMessage(t, bob, bobR) // Bob joined one session, not one plus a new one
+}
+
+func TestJoinWithoutSessionIDSkipsStartedSession(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, _ := authenticate(t, addr, "Alice")
+	bob, bobR, bobID := authenticate(t, addr, "Bob")
+	aliceSession := createSession(t, alice, aliceR, 3)
+	sendMessage(t, alice, readyRequest(4, aliceSession, true)) // the stub starts with one ready player
+	expectState(t, alice, aliceR, 4, pb.SessionStatus_SESSION_STATUS_IN_PROGRESS)
+
+	sendMessage(t, bob, joinRequest(3, "stub", ""))
+	state := expectState(t, bob, bobR, 3, pb.SessionStatus_SESSION_STATUS_WAITING)
+	if state.GetSessionId() == aliceSession {
+		t.Fatalf("expected a new session, got the started session %q", aliceSession)
+	}
+	if players := state.GetPlayers(); len(players) != 1 || players[0].GetPlayerId() != bobID {
+		t.Fatalf("expected Bob alone in the new session, got %v", players)
+	}
+	expectNoMessage(t, alice, aliceR)
+}
+
+func TestJoinWithoutSessionIDSkipsFullSession(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, _ := authenticate(t, addr, "Alice")
+	bob, bobR, bobID := authenticate(t, addr, "Bob")
+	sendMessage(t, alice, joinRequest(3, "stub-solo", "")) // stub-solo fits one player
+	aliceSession := expectState(t, alice, aliceR, 3, pb.SessionStatus_SESSION_STATUS_WAITING).GetSessionId()
+
+	sendMessage(t, bob, joinRequest(3, "stub-solo", ""))
+	state := expectState(t, bob, bobR, 3, pb.SessionStatus_SESSION_STATUS_WAITING)
+	if state.GetSessionId() == aliceSession {
+		t.Fatalf("expected a new session, got the full session %q", aliceSession)
+	}
+	if players := state.GetPlayers(); len(players) != 1 || players[0].GetPlayerId() != bobID {
+		t.Fatalf("expected Bob alone in the new session, got %v", players)
+	}
+	expectNoMessage(t, alice, aliceR)
 }
