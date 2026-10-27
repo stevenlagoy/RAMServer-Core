@@ -262,9 +262,9 @@ Usable in any phase. When it answers a specific request, the envelope's `in_repl
 | `ERROR_CODE_OUT_OF_TURN`              | 6   | Action submitted by a player who is not `active_player_id`.                                                                        |
 | `ERROR_CODE_ILLEGAL_ACTION`           | 7   | Action refused by the game in the session's current phase.                                                                         |
 | `ERROR_CODE_MALFORMED_MESSAGE`        | 8   | An envelope, or an opaque action payload, could not be parsed.                                                                     |
-| `ERROR_CODE_INVALID_STATE`            | 9   | Message not valid in the current phase, such as `JoinGameRequest` before `AuthResponse`, a second `ConnectRequest`, or `SetReadyRequest` after the match has started. |
+| `ERROR_CODE_INVALID_STATE`            | 9   | Message not valid in the current phase, such as `JoinSessionRequest` before `AuthResponse`, a second `ConnectRequest`, or `SetReadyRequest` after the match has started. |
 | `ERROR_CODE_NOT_IN_SESSION`           | 10  | The session exists, but the sender is not a member of it.                                                                          |
-| `ERROR_CODE_ALREADY_IN_SESSION`       | 11  | `JoinGameRequest` sent by a player who is already a member of a session.                                                           |
+| `ERROR_CODE_ALREADY_IN_SESSION`       | 11  | `JoinSessionRequest` sent by a player who is already a member of a session.                                                        |
 | `ERROR_CODE_INVALID_ARGUMENT`         | 12  | A field failed validation, such as an empty or overly long `display_name` or an empty `game_id`.                                   |
 | `ERROR_CODE_STALE_STATE`              | 13  | `expected_state_version` did not match the session's current `state_version`.                                                      |
 | `ERROR_CODE_INTERNAL`                 | 14  | The server failed while handling an otherwise valid request. Session state is unchanged.                                           |
@@ -299,7 +299,7 @@ The sequence below shows a full session for a 2-player match: connect,
 authenticate, join a session, ready up, play until a match result. `Server`
 broadcasts (`StateUpdate`, `MatchResult`) to every player in the session, not
 just the sender. The match starts as soon as the game's start condition is met
-by the ready players. `JoinGameRequest` with an empty `session_id` asks the
+by the ready players. `JoinSessionRequest` with an empty `session_id` asks the
 game's policy to select or create a session. The illegal-action branch shows the
 case tested by FR-06/FR-07: a rejected action leaves state unchanged and
 never reaches `StateUpdate`.
@@ -320,9 +320,9 @@ sequenceDiagram
     B->>S: AuthRequest
     S-->>B: AuthResponse (player_id, reconnect_token)
 
-    A->>S: JoinGameRequest (empty session_id)
+    A->>S: JoinSessionRequest (empty session_id)
     S-->>A: StateUpdate (session_id, status: WAITING)
-    B->>S: JoinGameRequest (same game_id)
+    B->>S: JoinSessionRequest (same game_id)
     S-->>A: StateUpdate (players, game-defined view)
     S-->>B: StateUpdate (players, game-defined view)
 
