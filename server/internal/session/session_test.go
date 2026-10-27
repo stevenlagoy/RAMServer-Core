@@ -168,8 +168,7 @@ func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 	}
 }
 
-// Joins refused by the session reach clients as ERROR_CODE_SESSION_NOT_JOINABLE. Tested here
-// because a match cannot yet be started over the protocol.
+// Joins refused by the session reach clients as ERROR_CODE_SESSION_NOT_JOINABLE
 func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
 	s, ctx := startSession(t, &StubGame.StubGame{})
 	a := newFakeSender()
