@@ -4,6 +4,13 @@
 
 Run these commands from the `server` directory, with a server running (`go run ./cmd/ramserver` or Docker Compose).
 
+The examples use the `stub` test game, which the server only registers when `RAMSERVER_STUB_GAME` is set:
+
+```bash
+RAMSERVER_STUB_GAME=1 go run ./cmd/ramserver
+RAMSERVER_STUB_GAME=1 docker compose up --build   # from the repository root
+```
+
 ## Interactive mode
 
 ```bash
@@ -16,8 +23,8 @@ Example:
 
 ```text
 Connected to 127.0.0.1:9000
-[2026-10-11 00:32:22] -> CONNECT   sequence:1 connect_request:{protocol_version:"1.0" client_name:"leanclient"}
-[2026-10-11 00:32:22] <- CONNECTED in_reply_to:1 connect_response:{connection_id:"127.0.0.1:34686" server_protocol_version:"1.0"}
+[2026-10-11 00:32:22] -> CONNECT   sequence:1 connect_request:{protocol_version:"1.1" client_name:"leanclient"}
+[2026-10-11 00:32:22] <- CONNECTED in_reply_to:1 connect_response:{connection_id:"127.0.0.1:34686" server_protocol_version:"1.1"}
 [2026-10-11 00:32:22] -> AUTH      sequence:2 auth_request:{display_name:"Alice"}
 [2026-10-11 00:32:22] <- AUTHED    in_reply_to:2 auth_response:{player_id:"69e0ff70..." reconnect_token:"8b5d0494..."}
 Type a command, or help for the list. Exit with Ctrl+C or EOF.
@@ -78,7 +85,7 @@ go run ./cmd/leanclient -version 2.0
 -send string
       run one command after the handshake, print one response, then exit
 -version string
-      protocol version sent in ConnectRequest (default "1.0")
+      protocol version sent in ConnectRequest (default "1.1")
 ```
 
 Go's standard `-h` / `--help` output is also available:
