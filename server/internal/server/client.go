@@ -250,7 +250,7 @@ func (c *Client) handleJoinSession(ctx context.Context, msg transport.ClientMess
 		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidArgument, "game_id is required")))
 		return
 	}
-	// Create a new session
+	// No session_id: join an open session, or create one
 	if msg.SessionID == "" {
 		// Join an existing open session if available
 		for _, s := range c.sessions.List(msg.GameID, true) {
