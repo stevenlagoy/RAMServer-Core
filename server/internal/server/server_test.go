@@ -571,3 +571,51 @@ func TestReadyAndLegalActionsRequireSession(t *testing.T) {
 		t.Fatalf("expected an empty LegalActionsResponse in reply to 6, got %v", resp)
 	}
 }
+
+func TestJoinWithoutSessionIDJoinsOpenSession(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, aliceID := authenticate(t, addr, "Alice")
+	bob, bobR, bobID := authenticate(t, addr, "Bob")
+
+	sendMessage(t, alice, &pb.ClientMessage{
+		Sequence: 3,
+		Payload:  &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{GameId: "stub"}},
+	})
+	aliceResp := expectMessage(t, alice, aliceR)
+	if aliceResp.GetStateUpdate() == nil || aliceResp.GetInReplyTo() != 3 {
+		t.Fatalf("expected StateUpdate in reply to 3, got %v", aliceResp)
+	}
+	aliceSessionID := aliceResp.GetStateUpdate().GetSessionId()
+
+	sendMessage(t, bob, &pb.ClientMessage{
+		Sequence: 4,
+		Payload:  &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{GameId: "stub"}},
+	})
+	bobResp := expectMessage(t, bob, bobR)
+	if bobResp.GetStateUpdate() == nil || bobResp.GetInReplyTo() != 4 {
+		t.Fatalf("expected StateUpdate in reply to 4, got %v", bobResp)
+	}
+	bobSessionID := bobResp.GetStateUpdate().GetSessionId()
+
+	if aliceSessionID != bobSessionID {
+		t.Fatalf("expected alice and bob sessionID to be the same [ aliceSessionID: %v, bobSessionID: %v ]", aliceSessionID, bobSessionID)
+	}
+
+	if players := bobResp.GetStateUpdate().GetPlayers(); len(players) != 2 || players[0].GetPlayerId() != aliceID || players[1].GetPlayerId() != bobID {
+		t.Fatalf("expected both players to be in state update to Bob: %v", bobResp)
+	}
+
+	resp := expectMessage(t, alice, aliceR)
+	state := resp.GetStateUpdate()
+
+	if state == nil || resp.GetInReplyTo() != 0 {
+		t.Fatalf("expected StateUpdate in reply to 0, got %v", resp)
+	}
+	if state.GetSessionId() == "" || state.GetGameId() != "stub" || state.GetStatus() != pb.SessionStatus_SESSION_STATUS_WAITING {
+		t.Fatalf("unexpected session fields: %v", state)
+	}
+	if players := state.GetPlayers(); len(players) != 2 || players[0].GetPlayerId() != aliceID || players[1].GetPlayerId() != bobID {
+		t.Fatalf("expected both players to be in state update broadcast: %v", state)
+	}
+}
