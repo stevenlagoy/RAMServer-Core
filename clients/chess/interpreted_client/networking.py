@@ -93,6 +93,19 @@ prev_state: State | None = None
 last_good_state: State | None = None
 legal_moves: list[Move] = []  # your moves for the current turn, from the latest LegalActionsResponse
 
+@dataclass
+class MatchOutcome:
+    won: bool
+    draw: bool
+
+match_outcome: MatchOutcome | None = None  # set when a match ends, until main takes it
+
+def get_match_outcome():
+    global match_outcome
+    res = match_outcome
+    match_outcome = None
+    return res
+
 def get_recent_state():
     global recent_state, prev_state
     res = recent_state
@@ -103,7 +116,7 @@ def get_recent_state():
 
 def listen_and_print_server_messages(sock: socket.socket):
     """Continuously intercepts incoming stream packets, unpacks them, and prints them out."""
-    global player_id, session_id, recent_state, prev_state, last_good_state, own_color, legal_moves
+    global player_id, session_id, recent_state, prev_state, last_good_state, own_color, legal_moves, match_outcome
     try:
         while True:
             msg_bytes = recv_msg(sock)
@@ -142,6 +155,10 @@ def listen_and_print_server_messages(sock: socket.socket):
                     last_good_state = state
                     recent_state = state
                     legal_moves = []  # for the previous position; main requests new ones on your turn
+
+            if server_msg.HasField("match_result"):
+                result = server_msg.match_result
+                match_outcome = MatchOutcome(won=player_id in result.winner_player_ids, draw=result.draw)
 
             if server_msg.HasField("legal_actions_response"):
                 payloads = (bytes(spec.payload).decode("ascii", "replace") for spec in server_msg.legal_actions_response.legal_actions)
