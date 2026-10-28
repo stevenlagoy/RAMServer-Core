@@ -51,6 +51,7 @@ def main() -> None:
     board.style = style
     running = True
     held_piece: Piece | None = None
+    my_turn = False  # pieces can only be picked up on your turn
 
     # Main loop
     while running:
@@ -68,8 +69,8 @@ def main() -> None:
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 pos = board.screen_to_board(event.pos)
                 piece = board.piece_at(pos)
-                # Only your own pieces can be picked up. Your color is unknown until the match starts
-                if piece is not None and piece.color == networking.own_color:
+                # Only your own pieces can be picked up, and only on your turn. Your color is unknown until the match starts
+                if my_turn and piece is not None and piece.color == networking.own_color:
                     held_piece = piece
                     held_piece.x, held_piece.y = pos
             elif event.type == pygame.MOUSEMOTION and held_piece is not None:
@@ -91,9 +92,11 @@ def main() -> None:
             print(f"Black pieces: {[(p.rank, p.file) for p in board.pieces if p.color == PlayerColor.BLACK]}")
             board.view_for = networking.own_color or PlayerColor.WHITE
             held_piece = None  # the board was rebuilt, so any held piece no longer exists
+            my_turn = state.my_turn
         if move is not None:
             # Submit the action
             networking.send_action(sock, move)
+            my_turn = False  # until the server's reply; a rejected move restores the last good state, and with it your turn
         
         # Render
         screen.fill(style.background_color)

@@ -112,7 +112,8 @@ def listen_and_print_server_messages(sock: socket.socket):
                 player_id = server_msg.auth_response.player_id
                 print(player_id)
 
-            if server_msg.state_update is not None:
+            # A message field is never None in Python protobuf, so check which payload was actually sent
+            if server_msg.HasField("state_update"):
                 session_id = server_msg.state_update.session_id or session_id
                 state = State(
                     server_msg.state_update.status,
@@ -135,7 +136,7 @@ def listen_and_print_server_messages(sock: socket.socket):
                     last_good_state = state
                     recent_state = state
 
-            if server_msg.error_response is not None:
+            if server_msg.HasField("error_response"):
                 recent_state = last_good_state
 
             # Heartbeat
