@@ -4,7 +4,7 @@ import pygame
 import time
 import argparse
 
-from piece import Piece, PlayerColor
+from piece import Piece, PieceType, PlayerColor
 from board import Board, START_FEN
 from move import Move
 from styles import BoardStyle
@@ -22,6 +22,15 @@ def layout(board: Board, screen: pygame.Surface) -> None:
     width, height = screen.get_size()
     board.resize(int(min(width, height) * BOARD_FILL))
     board.center_on((width // 2, height // 2))
+
+
+def legal_move(piece: Piece, square: tuple[int, int]) -> Move | None:
+    """The legal move taking piece to square, if there is one. A pawn reaching the last rank promotes to a queen."""
+    return next((
+        m for m in networking.legal_moves
+        if (m.from_rank, m.from_file) == (piece.rank, piece.file) and (m.to_rank, m.to_file) == square
+        and m.promotion in (None, PieceType.QUEEN)
+    ), None)
 
 
 def main() -> None:
@@ -50,7 +59,9 @@ def main() -> None:
     style = BoardStyle.STANDARD if args.style.upper() == "STANDARD" else BoardStyle.COLORFUL
     board.style = style
     running = True
-    held_piece: Piece | None = None
+    held_piece: Piece | None = None  # being dragged
+    selected: Piece | None = None  # picked by a click or a drag; its legal moves are shown
+    deselect_on_release = False  # clicking the selected piece again, without dragging it, deselects it
     my_turn = False  # pieces can only be picked up on your turn
 
     # Main loop
@@ -68,20 +79,27 @@ def main() -> None:
                 layout(board, screen)
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 pos = board.screen_to_board(event.pos)
-                piece = board.piece_at(pos)
+                square = board.square_at(pos)
+                piece = board.piece_at_square(*square) if square is not None else None
+                if selected is not None and square is not None and (move := legal_move(selected, square)) is not None:
+                    selected = None  # second click of click-to-move
                 # Only your own pieces can be picked up, and only on your turn. Your color is unknown until the match starts
-                if my_turn and piece is not None and piece.color == networking.own_color:
-                    held_piece = piece
+                elif my_turn and piece is not None and piece.color == networking.own_color:
+                    deselect_on_release = piece is selected
+                    selected = held_piece = piece
                     held_piece.x, held_piece.y = pos
+                else:
+                    selected = None
             elif event.type == pygame.MOUSEMOTION and held_piece is not None:
                 held_piece.x, held_piece.y = board.screen_to_board(event.pos)
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and held_piece is not None:
                 held_piece.x = held_piece.y = None  # snap back to its square unless the drop is a move
                 square = board.square_at(board.screen_to_board(event.pos))
-                if square is not None and square != (held_piece.rank, held_piece.file):
-                    move = Move(held_piece.rank, held_piece.file, *square)
-                    held_piece.rank, held_piece.file = square  # shown until the server's next state replaces it
-                held_piece = None
+                if square is not None and (move := legal_move(held_piece, square)) is not None:
+                    selected = None
+                elif square == (held_piece.rank, held_piece.file) and deselect_on_release:
+                    selected = None
+                held_piece = None  # an illegal drop leaves the piece selected, so a click can still move it
         
         # Logic
         if (state := networking.get_recent_state()) is not None:
@@ -91,12 +109,20 @@ def main() -> None:
             print(f"board.view_for = {board.view_for}")
             print(f"Black pieces: {[(p.rank, p.file) for p in board.pieces if p.color == PlayerColor.BLACK]}")
             board.view_for = networking.own_color or PlayerColor.WHITE
-            held_piece = None  # the board was rebuilt, so any held piece no longer exists
+            held_piece = selected = None  # the board was rebuilt, so these pieces no longer exist
             my_turn = state.my_turn
+            if my_turn:
+                networking.request_legal_moves(sock)
         if move is not None:
             # Submit the action
             networking.send_action(sock, move)
+            board.preview(move)
             my_turn = False  # until the server's reply; a rejected move restores the last good state, and with it your turn
+        board.selected = (selected.rank, selected.file) if selected is not None else None
+        board.targets = {
+            (m.to_rank, m.to_file) for m in networking.legal_moves
+            if selected is not None and (m.from_rank, m.from_file) == (selected.rank, selected.file)
+        }
         
         # Render
         screen.fill(style.background_color)

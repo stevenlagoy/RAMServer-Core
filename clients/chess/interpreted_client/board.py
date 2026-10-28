@@ -2,6 +2,7 @@ from __future__ import annotations
 import io
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pygame
 from pygame import Surface, Rect
@@ -10,9 +11,14 @@ from pygame.draw import rect
 from piece import Piece, PieceType, PlayerColor, get_sprite_file
 from styles import BoardStyle
 
+if TYPE_CHECKING:
+    from move import Move  # move imports board, so only for type hints
+
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 PIECE_SCALE = 0.9  # piece size as a fraction of the square size
+SELECTED_COLOR = (255, 230, 0, 90)  # tint on the selected piece's square
+TARGET_COLOR = (60, 160, 60, 170)  # markers on the squares the selected piece can move to
 
 
 def load_svg(path: Path, size: int) -> Surface:
@@ -42,6 +48,8 @@ class Board:
         self.squares_per_rank: int = 8
         self.squares_per_file: int = 8
         self.origin: tuple[int, int] = (0, 0)  # top-left corner on the screen
+        self.selected: tuple[int, int] | None = None  # (rank, file) of the selected piece
+        self.targets: set[tuple[int, int]] = set()  # (rank, file) squares the selected piece can move to
         self._sprites: dict[tuple[PlayerColor, PieceType], Surface] = {}  # scaled for the current square size
         self.resize(size)
 
@@ -72,19 +80,45 @@ class Board:
                 color = self.style.dark_color if (rank + file) % 2 == 0 else self.style.light_color
                 rect(surface, color, Rect(x, y, self.square_size, self.square_size))
 
+        if self.selected is not None:
+            tint = Surface((self.square_size, self.square_size), pygame.SRCALPHA)
+            tint.fill(SELECTED_COLOR)
+            surface.blit(tint, self.square_to_coords(*self.selected))
+
         # Pieces centered in their squares; a dragged piece is centered on the cursor and drawn last, on top
         dragged = [p for p in self.pieces if p.x is not None and p.y is not None]
-        for piece in [p for p in self.pieces if p not in dragged] + dragged:
-            sprite = self.sprite(piece.color, piece.piece_type)
-            if piece in dragged:
-                assert piece.x is not None and piece.y is not None
-                center = (piece.x, piece.y)
-            else:
+        for piece in self.pieces:
+            if piece not in dragged:
                 x, y = self.square_to_coords(piece.rank, piece.file)
-                center = (x + self.square_size / 2, y + self.square_size / 2)
-            surface.blit(sprite, sprite.get_rect(center=(round(center[0]), round(center[1]))))
+                self._draw_piece(surface, piece, (x + self.square_size / 2, y + self.square_size / 2))
+
+        # Target markers go over the pieces, so a capture shows as a ring around the piece it takes
+        markers = Surface((self.size, self.size), pygame.SRCALPHA)
+        for rank, file in self.targets:
+            x, y = self.square_to_coords(rank, file)
+            center = (x + self.square_size // 2, y + self.square_size // 2)
+            if self.piece_at_square(rank, file) is None:
+                pygame.draw.circle(markers, TARGET_COLOR, center, self.square_size // 6)
+            else:
+                pygame.draw.circle(markers, TARGET_COLOR, center, self.square_size // 2, max(2, self.square_size // 12))
+        surface.blit(markers, (0, 0))
+
+        for piece in dragged:
+            assert piece.x is not None and piece.y is not None
+            self._draw_piece(surface, piece, (piece.x, piece.y))
 
         target.blit(surface, self.origin)
+
+    def _draw_piece(self, surface: Surface, piece: Piece, center: tuple[float, float]) -> None:
+        sprite = self.sprite(piece.color, piece.piece_type)
+        surface.blit(sprite, sprite.get_rect(center=(round(center[0]), round(center[1]))))
+
+    def preview(self, move: Move) -> None:
+        """Show move on the board until the server's next state replaces it."""
+        self.pieces = [p for p in self.pieces if (p.rank, p.file) != (move.to_rank, move.to_file)]  # a captured piece
+        piece = self.piece_at_square(move.from_rank, move.from_file)
+        if piece is not None:
+            piece.rank, piece.file = move.to_rank, move.to_file
 
     def square_to_coords(self, rank: int, file: int) -> tuple[int, int]:
         """Top-left corner of a square, relative to the board."""

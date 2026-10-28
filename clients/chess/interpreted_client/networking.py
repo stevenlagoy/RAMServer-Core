@@ -60,6 +60,11 @@ def ready(sock: socket.socket):
     client_msg.set_ready_request.ready = True
     send_msg(sock, client_msg)
 
+def request_legal_moves(sock: socket.socket):
+    client_msg = ClientMessage()
+    client_msg.legal_actions_request.session_id = session_id
+    send_msg(sock, client_msg)
+
 def ping(sock: socket.socket):
     client_msg = ClientMessage()
     readable_json = MessageToJson(client_msg, preserving_proto_field_name=True)
@@ -86,6 +91,7 @@ class State:
 recent_state: State | None = None
 prev_state: State | None = None
 last_good_state: State | None = None
+legal_moves: list[Move] = []  # your moves for the current turn, from the latest LegalActionsResponse
 
 def get_recent_state():
     global recent_state, prev_state
@@ -97,7 +103,7 @@ def get_recent_state():
 
 def listen_and_print_server_messages(sock: socket.socket):
     """Continuously intercepts incoming stream packets, unpacks them, and prints them out."""
-    global player_id, session_id, recent_state, prev_state, last_good_state, own_color
+    global player_id, session_id, recent_state, prev_state, last_good_state, own_color, legal_moves
     try:
         while True:
             msg_bytes = recv_msg(sock)
@@ -135,6 +141,11 @@ def listen_and_print_server_messages(sock: socket.socket):
                 if state.view != b'' and state != last_good_state:
                     last_good_state = state
                     recent_state = state
+                    legal_moves = []  # for the previous position; main requests new ones on your turn
+
+            if server_msg.HasField("legal_actions_response"):
+                payloads = (bytes(spec.payload).decode("ascii", "replace") for spec in server_msg.legal_actions_response.legal_actions)
+                legal_moves = [move for payload in payloads if (move := Move.from_uci(payload)) is not None]
 
             if server_msg.HasField("error_response"):
                 recent_state = last_good_state
