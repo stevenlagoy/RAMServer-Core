@@ -19,6 +19,9 @@ START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 PIECE_SCALE = 0.9  # piece size as a fraction of the square size
 SELECTED_COLOR = (255, 230, 0, 90)  # tint on the selected piece's square
 TARGET_COLOR = (60, 160, 60, 170)  # markers on the squares the selected piece can move to
+DIM_COLOR = (0, 0, 0, 120)  # darkens the board behind the promotion picker
+PICKER_COLOR = (235, 235, 235)  # background of the promotion picker's squares
+PROMOTION_ORDER = (PieceType.QUEEN, PieceType.KNIGHT, PieceType.ROOK, PieceType.BISHOP)
 
 
 def load_svg(path: Path, size: int) -> Surface:
@@ -50,6 +53,7 @@ class Board:
         self.origin: tuple[int, int] = (0, 0)  # top-left corner on the screen
         self.selected: tuple[int, int] | None = None  # (rank, file) of the selected piece
         self.targets: set[tuple[int, int]] = set()  # (rank, file) squares the selected piece can move to
+        self.promotion: tuple[tuple[int, int], PlayerColor] | None = None  # (rank, file) and color of a promotion being chosen
         self._sprites: dict[tuple[PlayerColor, PieceType], Surface] = {}  # scaled for the current square size
         self.resize(size)
 
@@ -107,7 +111,34 @@ class Board:
             assert piece.x is not None and piece.y is not None
             self._draw_piece(surface, piece, (piece.x, piece.y))
 
+        if self.promotion is not None:
+            dim = Surface((self.size, self.size), pygame.SRCALPHA)
+            dim.fill(DIM_COLOR)
+            surface.blit(dim, (0, 0))
+            _, color = self.promotion
+            for piece_type, (x, y) in self._promotion_squares():
+                rect(surface, PICKER_COLOR, Rect(x, y, self.square_size, self.square_size))
+                sprite = self.sprite(color, piece_type)
+                surface.blit(sprite, sprite.get_rect(center=(x + self.square_size // 2, y + self.square_size // 2)))
+
         target.blit(surface, self.origin)
+
+    def _promotion_squares(self) -> list[tuple[PieceType, tuple[int, int]]]:
+        """Each promotion choice with the top-left corner of its picker square. The picker starts on the
+        promotion square and runs toward the middle of the board, so it always fits."""
+        if self.promotion is None:
+            return []
+        (rank, file), _ = self.promotion
+        x, y = self.square_to_coords(rank, file)
+        step = self.square_size if y < self.size // 2 else -self.square_size
+        return [(piece_type, (x, y + i * step)) for i, piece_type in enumerate(PROMOTION_ORDER)]
+
+    def promotion_choice_at(self, pos: tuple[float, float]) -> PieceType | None:
+        """The promotion piece under a board-relative position, if the picker is showing one there."""
+        for piece_type, (x, y) in self._promotion_squares():
+            if x <= pos[0] < x + self.square_size and y <= pos[1] < y + self.square_size:
+                return piece_type
+        return None
 
     def _draw_piece(self, surface: Surface, piece: Piece, center: tuple[float, float]) -> None:
         sprite = self.sprite(piece.color, piece.piece_type)
@@ -119,6 +150,7 @@ class Board:
         piece = self.piece_at_square(move.from_rank, move.from_file)
         if piece is not None:
             piece.rank, piece.file = move.to_rank, move.to_file
+            piece.piece_type = move.promotion or piece.piece_type
 
     def square_to_coords(self, rank: int, file: int) -> tuple[int, int]:
         """Top-left corner of a square, relative to the board."""
