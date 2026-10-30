@@ -1,0 +1,35 @@
+@startuml 14_ui_navigation
+title UI Navigation Model (core client workflow)
+skinparam shadowing false
+hide empty description
+skinparam state<<planned>> {
+  BackgroundColor #EEEEEE
+  BorderColor #888888
+  FontColor #666666
+}
+
+[*] --> Connect
+state "1 Connect" as Connect
+state "2 Lobby" as Lobby
+state "3 Waiting Room" as Waiting
+state "4 Match" as Match
+state "5 Result" as Result
+
+Connect --> Lobby : ConnectResponse and AuthResponse
+Connect --> Connect : ErrorResponse (version, auth)\nshow banner
+Lobby --> Waiting : StateUpdate (create or join succeeded)
+Lobby --> Lobby : ErrorResponse (not found, not joinable)\nshow banner
+Waiting --> Match : StateUpdate with status IN_PROGRESS
+Waiting --> Lobby : LeaveSessionResponse
+Match --> Match : StateUpdate (redraw)\nErrorResponse (banner, snap back)
+Match --> Result : MatchResult
+Result --> Waiting : Ready for rematch
+Result --> Lobby : LeaveSessionResponse
+Match --> Lobby : LeaveSessionResponse (forfeit)
+Connect --> Connect : connection closed (from any screen)
+
+state "Reconnecting" as Reconnect <<planned>>
+Match --> Reconnect : connection lost
+Reconnect --> Match : AuthRequest(player_id, token) accepted
+Reconnect --> Connect : grace period expired
+@enduml

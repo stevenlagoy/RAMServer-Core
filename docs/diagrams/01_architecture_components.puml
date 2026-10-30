@@ -1,0 +1,95 @@
+@startuml 01_architecture_components
+title RAMServer-Core: Layered Architecture, Interfaces, and Dependencies
+left to right direction
+skinparam shadowing false
+skinparam componentStyle rectangle
+skinparam component<<planned>> {
+  BackgroundColor #EEEEEE
+  BorderColor #888888
+  FontColor #666666
+}
+skinparam database<<planned>> {
+  BackgroundColor #EEEEEE
+  BorderColor #888888
+  FontColor #666666
+}
+
+actor "Player clients\n(Chess, Tic-Tac-Toe, Go Fish)" as Clients
+component "leanclient\n(cmd/leanclient)" as Lean
+
+package "Composition roots" {
+  component "cmd/ramserver\nconfig, registry, signal handling" as Main
+  component "ramserver facade\nembeddable Serve()" as Facade
+}
+
+package "Connection layer (internal/server)" {
+  component "Serve\naccept loop, per-IP limit,\nconnection semaphore" as Serve
+  component "Client\nread and write loops, handshake,\nidentity binding, dispatch" as ClientC
+}
+
+package "Transport layer (internal/transport, gen)" {
+  component "framing\nReadFrame / WriteFrame\n4-byte length prefix, 64 KiB cap" as Framing
+  component "codec\nDecodeClientMessage, Encode*,\nProtocolError, error codes" as Codec
+  component "gen/ramserver/v1\nbuf-generated protobuf" as Gen
+}
+
+package "Session layer (internal/session)" {
+  component "SessionStore\ncreate, get, list, remove" as Store
+  component "Session (actor)\nroster, roles, readiness,\nbroadcast, history" as Session
+}
+
+package "Match layer (internal/match)" {
+  component "Match\nturn check, validate, apply,\noutcome, per-member view" as Match
+}
+
+package "Game plugin API (game)" {
+  interface "Game" as IGame
+  component "Registry\nname -> Factory" as Registry
+}
+
+package "Rulesets" {
+  component "chess.Game" as Chess
+  component "StubGame\n(internal/testgame)" as Stub
+  component "gofish.Game" as GoFish <<planned>>
+}
+
+package "Persistence (planned)" {
+  component "store\nmatch and action-log writes,\none transaction per match" as PStore <<planned>>
+  database "SQLite file" as DB <<planned>>
+}
+
+interface "Sender\nSend([]byte)" as ISender
+
+Clients --> Serve : TCP :9000
+Lean --> Serve : TCP :9000
+Serve --> ClientC : one Client per connection
+ClientC --> Framing
+ClientC --> Codec
+Codec --> Gen
+ClientC --> Store : create / get
+ClientC --> Session : Join, Leave,\nSetReady, Submit
+ClientC --> Registry : New(game_id)
+ClientC ..|> ISender
+Session ..> ISender : requires
+Session --> Codec : Encode*
+Session --> Match : owns current
+Session --> IGame : Roles, ReadyToStart
+Match --> IGame : ActiveTurn, Validate,\nApply, Outcome, ViewFor
+Chess ..|> IGame
+Stub ..|> IGame
+GoFish ..|> IGame
+Registry ..> IGame : constructs
+Main --> Registry : Register
+Main --> Serve
+Facade --> Serve
+Session ..> PStore : save finished match
+PStore ..> DB
+
+note bottom of IGame
+  The game package imports nothing from internal/*.
+  Core layers depend on the Game interface and never on a concrete ruleset (FR-5, NFR-14).
+end note
+legend right
+  Grey boxes are planned and not yet implemented.
+endlegend
+@enduml
