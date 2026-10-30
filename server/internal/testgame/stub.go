@@ -13,7 +13,8 @@ type Result struct{ game.Result }
 
 // Placeholder game to exercise the server
 type StubGame struct {
-	EndAfter int // How many actions end the match; defaults to 4
+	EndAfter   int // How many actions end the match; defaults to 4
+	MaxPlayers int // How many players fit in a lobby; 0 means no limit
 }
 
 // StubGame's state
@@ -25,7 +26,7 @@ type stubState struct {
 }
 
 func (g *StubGame) Roles() []game.RoleSpec {
-	return []game.RoleSpec{{Name: game.RolePlayer, Min: 1, Max: 0}}
+	return []game.RoleSpec{{Name: game.RolePlayer, Min: 1, Max: g.MaxPlayers}}
 }
 
 func (g *StubGame) NewState(rosterOrder []string, roles map[string]game.Role) game.GameState {

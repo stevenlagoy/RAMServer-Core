@@ -250,9 +250,22 @@ func (c *Client) handleJoinSession(ctx context.Context, msg transport.ClientMess
 		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidArgument, "game_id is required")))
 		return
 	}
-	// Create a new session
+	// No session_id: join an open session, or create one
 	if msg.SessionID == "" {
-		// TODO: let the game's policy select an existing session before creating one
+		// Join an existing open session if available
+		for _, s := range c.sessions.List(msg.GameID, true) {
+			err := s.Join(ctx, c.ID, c.DisplayName, msg.Sequence, c)
+			if err == nil {
+				c.session = s
+				return
+			}
+			if !errors.Is(err, session.ErrLobbyFull) && !errors.Is(err, session.ErrAlreadyStarted) {
+				c.Send(transport.EncodeError(msg.Sequence, err)) // e.g. ctx cancelled: don't create a session
+				return
+			}
+		}
+
+		// No open sessions, make a new one
 		g, err := c.games.New(msg.GameID)
 		if err != nil {
 			c.Send(transport.EncodeError(msg.Sequence, transport.WrapError(transport.CodeUnknownGame, err)))
