@@ -341,6 +341,16 @@ public class NetworkClient {
         }
     }
 
+    public void ready() {
+        if (!checkConnection()) return;
+        try {
+            ClientMessage createMessage = ClientMessage.newBuilder().setSetReadyRequest(SetReadyRequest.newBuilder().setSessionId(currentSessionId).setReady(true).build()).build();
+            sendMessage(createMessage);
+        } catch (Exception e) {
+            System.err.println("Error joining session");
+        }
+    }
+
     public void leaveSession() {
         if (!checkConnection()) return;
 

@@ -68,6 +68,9 @@ public class CommandHandler {
                 return false;
             }
 
+            case "ready" -> client.ready();
+
+
             default -> output.accept(
                     "Unknown command. Type 'help' for commands."
             );
