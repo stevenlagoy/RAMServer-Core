@@ -16,9 +16,12 @@ public class CLI implements Runnable {
     @Override
     public void run() {
         Scanner scanner = new Scanner(System.in);
+        CommandHandler commands = new CommandHandler(
+                client,
+                System.out::println
+        );
         System.out.println("CLI Client Started");
-        System.out.println("Type 'connect' to connect to the server");
-
+        System.out.println("Type 'help' for available commands.");
         while (running) {
             System.out.print("> ");
             if (!scanner.hasNextLine()) {
@@ -29,36 +32,7 @@ public class CLI implements Runnable {
 
             if (input.isEmpty()) continue;
 
-            String[] parts = input.split(" ", 2);
-            String command = parts[0].toLowerCase();
-            String args = parts.length > 1 ? parts[1] : "";
-
-            switch (command) {
-                case "connect" -> {
-                    if (args.isEmpty()) {
-                        System.out.println("Usage: connect <name>");
-                    } else {
-                        client.connect(args);
-                    }
-                }
-                case "create" -> client.createSession();
-                case "join" -> {
-                    if (args.isEmpty()) {
-                        System.out.println("Usage: join <session_id>");
-                    } else {
-                        client.joinSession(args);
-                    }
-                }
-                case "leave" -> client.leaveSession();
-                case "move" -> {
-                    if (args.isEmpty()) {
-                        System.out.println("Usage: move <notation>");
-                    } else {
-                        client.sendMove(args);
-                    }
-                }
-                case "disconnect" -> client.disconnect();
-            }
+            running = commands.execute(input);
         }
     }
 }

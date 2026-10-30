@@ -10,14 +10,17 @@ import java.net.Socket;
 public class NetworkClient {
     private final String host;
     private final int port;
-    private Socket socket;
+    private volatile Socket socket;
     private OutputStream outputStream;
     private InputStream inputStream;
-    private boolean connected = false;
+    private volatile boolean connected = false;
     private long sequenceNumber = 0;
+    private static final int MAX_FRAME_SIZE = 65536;
 
-    private String currentSessionId = "";
-    private String playerId = "";
+    private volatile String currentSessionId = "";
+    private volatile String playerId = "";
+    private volatile StateUpdate latestStateUpdate;
+    private volatile long pendingLeaveSequence = 0;
 
     public NetworkClient(String host, int port) {
         this.host = host;
@@ -39,11 +42,17 @@ public class NetworkClient {
 
             performHandshake(name);
 
-            Thread listeningThread = new Thread(this::listenForServerMessages);
+            Socket listeningSocket = socket;
+
+            Thread listeningThread = new Thread(
+                    () -> listenForServerMessages(listeningSocket)
+            );
+
             listeningThread.setDaemon(true);
             listeningThread.start();
         } catch (Exception e) {
-            e.printStackTrace();
+            System.err.println("Connection failed: " + e.getMessage());
+            disconnect();
         }
     }
 
@@ -62,9 +71,20 @@ public class NetworkClient {
         System.out.println("Waiting for server response...");
 
         ServerMessage connResponse = readSync();
-        if (connResponse == null || connResponse.hasErrorResponse()) {
+
+        if (connResponse == null) {
+            throw new IOException("Server disconnected during handshake");
+        }
+
+        if (connResponse.hasErrorResponse()) {
             throw new IOException(connResponse.getErrorResponse().toString());
         }
+
+        if (!connResponse.hasConnectResponse()) {
+            throw new IOException("Expected ConnectResponse, received: "
+                    + connResponse.getPayloadCase());
+        }
+
         System.out.println("Received server connect response");
 
         sequenceNumber++;
@@ -75,70 +95,98 @@ public class NetworkClient {
         System.out.println("Sending auth request");
 
         ServerMessage authResponse = readSync();
-        if (authResponse == null || authResponse.hasErrorResponse()) {
+
+        if (authResponse == null) {
+            throw new IOException("Server disconnected during authentication");
+        }
+
+        if (authResponse.hasErrorResponse()) {
             throw new IOException(authResponse.getErrorResponse().toString());
         }
-        System.out.println("Received server auth response");
+
+        if (!authResponse.hasAuthResponse()) {
+            throw new IOException("Expected AuthResponse, received: "
+                    + authResponse.getPayloadCase());
+        }
+
+        playerId = authResponse.getAuthResponse().getPlayerId();
+
+        if (playerId.isEmpty()) {
+            throw new IOException("Authentication response missing player ID");
+        }
+
+        System.out.println("Authenticated as " + name);
+        System.out.println("Player ID: " + playerId);
     }
 
     private ServerMessage readSync() throws IOException {
-        byte[] header = new byte[4];
-        int bytesRead = inputStream.readNBytes(header, 0, 4);
-        if (bytesRead < 4) return null;
-
-        int length = ((header[0] & 0xFF) << 24
-                | ((header[1] & 0xFF) << 16)
-                | ((header[2] & 0xFF) << 8)
-                | (header[3] & 0xFF)
-        );
-
-        if (length == 0) {
-            sendFrame(new byte[0]);
-            return readSync();
-        }
-
-        byte[] payload = inputStream.readNBytes(length);
-        return ServerMessage.parseFrom(payload);
+        return readFrame(socket);
     }
 
-    private void listenForServerMessages() {
-        try {
-            while (connected && !socket.isClosed()) {
-                byte[] header = new byte[4];
-                int bytesRead = inputStream.readNBytes(header, 0, 4);
-                if (bytesRead < 4) {
-                    System.out.println("Connection closed by server");
-                    break;
-                }
 
-                int length = ((header[0] & 0xFF) << 24
-                        | ((header[1] & 0xFF) << 16)
-                        | ((header[2] & 0xFF) << 8)
-                        | (header[3] & 0xFF)
-                );
 
-                if (length == 0) {
+    private ServerMessage readFrame(Socket connection) throws IOException {
+        DataInputStream in = new DataInputStream(
+                connection.getInputStream()
+        );
+
+        while (true) {
+            int length = in.readInt();
+
+            if (length < 0 || length > MAX_FRAME_SIZE) {
+                throw new IOException("Invalid frame length: " + length);
+            }
+
+            // Zero-length frames are heartbeats
+            if (length == 0) {
+                synchronized (this) {
+                    if (socket != connection || !connected) {
+                        throw new IOException("Connection is no longer active");
+                    }
+
                     sendFrame(new byte[0]);
-                    continue;
+                }
+                continue;
+            }
+
+            byte[] payload = new byte[length];
+            in.readFully(payload);
+
+            return ServerMessage.parseFrom(payload);
+        }
+    }
+
+
+
+
+    private void listenForServerMessages(Socket connection) {
+        try {
+            while (connected && socket == connection
+                    && !connection.isClosed()) {
+
+                ServerMessage serverMessage = readFrame(connection);
+
+                synchronized (this) {
+                    if (socket != connection || !connected) {
+                        break;
+                    }
+
+                    trackSession(serverMessage);
+                    logServerMessage(serverMessage);
                 }
 
-                byte[] payload = inputStream.readNBytes(length);
-                if (payload.length < length) {
-                    System.out.println("Connection closed during read");
-                    break;
-                }
-
-                ServerMessage serverMessage = ServerMessage.parseFrom(payload);
-                trackSession(serverMessage);
-                logServerMessage(serverMessage);
                 System.out.print("> ");
             }
         } catch (Exception e) {
-            if (connected) {
-                System.err.println("Connection closed");
+            if (connected && socket == connection) {
+                System.err.println("Connection closed: " + e.getMessage());
             }
         } finally {
-            disconnect();
+            synchronized (this) {
+                if (socket == connection) {
+                    disconnect();
+                }
+            }
         }
     }
 
@@ -149,25 +197,125 @@ public class NetworkClient {
         if (msg.hasConnectResponse()) kind = "CONNECTED";
         else if (msg.hasAuthResponse()) kind = "AUTHED";
         else if (msg.hasStateUpdate()) {
-            kind = "STATE";
-            StateUpdate stateUpdate = msg.getStateUpdate();
-            if (!stateUpdate.getEncodedView().isEmpty()) {
-                CLIRenderer.printBoard(stateUpdate.getEncodedView().toStringUtf8());
-            }
+            printStateUpdate(msg.getStateUpdate());
+            return;
         }
-        else if (msg.hasErrorResponse()) kind = "ERROR";
-        else if (msg.hasMatchResult()) kind = "RESULT";
+        else if (msg.hasErrorResponse()) {
+            ErrorResponse error = msg.getErrorResponse();
+
+            System.out.println("\n[<- ERROR]");
+            System.out.println("Code: " + error.getCode());
+            System.out.println("Message: " + error.getMessage());
+
+            return;
+        }
+        else if (msg.hasMatchResult()) {
+            MatchResult result = msg.getMatchResult();
+
+            System.out.println("\n[<- MATCH RESULT]");
+            System.out.println("Session: " + result.getSessionId());
+            System.out.println("Reason: " + result.getReason());
+
+            if (result.getDraw()) {
+                System.out.println("Result: Draw");
+            } else if (result.getWinnerPlayerIdsCount() > 0) {
+                for (String winnerId : result.getWinnerPlayerIdsList()) {
+                    String winnerName = winnerId;
+
+                    if (latestStateUpdate != null) {
+                        for (var player : latestStateUpdate.getPlayersList()) {
+                            if (player.getPlayerId().equals(winnerId)) {
+                                winnerName = player.getDisplayName();
+                                break;
+                            }
+                        }
+                    }
+
+                    if (winnerId.equals(playerId)) {
+                        winnerName += " (you)";
+                    }
+
+                    System.out.println("Winner: " + winnerName);
+                }
+            } else {
+                System.out.println("Result: No winner specified");
+            }
+
+            return;
+        }
         else if (msg.hasLeaveSessionResponse()) kind = "LEFT";
 
         System.out.println("\n[<- " + kind + "] " + body);
     }
 
+
+    private void printStateUpdate(StateUpdate state) {
+        System.out.println("\n[STATE]");
+        System.out.println("Session: " + state.getSessionId());
+        System.out.println("Game: " + state.getGameId());
+        System.out.println("Status: " + state.getStatus());
+        System.out.println("State version: " + state.getStateVersion());
+
+        System.out.println("Players:");
+        for (var player : state.getPlayersList()) {
+            String name = player.getDisplayName();
+
+            if (player.getPlayerId().equals(playerId)) {
+                name += " (you)";
+            }
+
+            System.out.println(" - " + name);
+        }
+
+        String activePlayer = state.getActivePlayerId();
+
+        if (!activePlayer.isEmpty()) {
+            String turn = activePlayer.equals(playerId)
+                    ? "You" : activePlayer;
+
+            if (!activePlayer.equals(playerId)) {
+                for (var player : state.getPlayersList()) {
+                    if (player.getPlayerId().equals(activePlayer)) {
+                        turn = player.getDisplayName();
+                        break;
+                    }
+                }
+            }
+
+            System.out.println("Turn: " + turn);
+        }
+
+        if (!state.getEncodedView().isEmpty()) {
+            CLIRenderer.printBoard(state.getEncodedView().toStringUtf8());
+        }
+    }
+
+    public void printSessionStatus() {
+        StateUpdate state = latestStateUpdate;
+
+        if (state == null) {
+            System.out.println("No session state available.");
+            return;
+        }
+
+        printStateUpdate(state);
+    }
+
+
     // Formerly sendActionRequest
     public void sendMove(String uciMove) {
         if (!checkConnection()) return;
+        StateUpdate state = latestStateUpdate;
+
+        String activePlayer = state.getActivePlayerId();
+
+        if (!activePlayer.isEmpty() && !activePlayer.equals(playerId)) {
+            System.out.println("It is not your turn.");
+            return;
+        }
 
         ClientMessage clientMsg = ClientMessage.newBuilder()
-                .setActionRequest(ActionRequest.newBuilder().setSessionId(currentSessionId).setEncodedAction(ByteString.copyFromUtf8(uciMove)).build())
+                .setActionRequest(ActionRequest.newBuilder().setSessionId(state.getSessionId()).setExpectedStateVersion(state.getStateVersion()).setEncodedAction(ByteString.copyFromUtf8(uciMove)).build())
                 .build();
 
         sendMessage(clientMsg);
@@ -176,7 +324,6 @@ public class NetworkClient {
     public void createSession() {
         if (!checkConnection()) return;
         try {
-            sequenceNumber++;
             ClientMessage createMessage = ClientMessage.newBuilder().setJoinSessionRequest(JoinSessionRequest.newBuilder().setGameId("chess").build()).build();
             sendMessage(createMessage);
         } catch (Exception e) {
@@ -187,7 +334,6 @@ public class NetworkClient {
     public void joinSession(String sessionId) {
         if (!checkConnection()) return;
         try {
-            sequenceNumber++;
             ClientMessage createMessage = ClientMessage.newBuilder().setJoinSessionRequest(JoinSessionRequest.newBuilder().setGameId("chess").setSessionId(sessionId).build()).build();
             sendMessage(createMessage);
         } catch (Exception e) {
@@ -196,19 +342,31 @@ public class NetworkClient {
     }
 
     public void leaveSession() {
-        if (!checkConnection() || currentSessionId.isEmpty()) return;
+        if (!checkConnection()) return;
 
-        try {
-            sequenceNumber++;
-            ClientMessage createMessage = ClientMessage.newBuilder().setLeaveSessionRequest(LeaveSessionRequest.newBuilder().setSessionId(currentSessionId).build()).build();
-            sendMessage(createMessage);
-        } catch (Exception e) {
-            System.err.println("Error leaving session");
+        if (currentSessionId.isEmpty()) {
+            System.out.println("You are not in a session.");
+            return;
         }
+
+        if (pendingLeaveSequence != 0) {
+            System.out.println("Already waiting for leave confirmation.");
+            return;
+        }
+
+        ClientMessage message = ClientMessage.newBuilder()
+                .setLeaveSessionRequest(
+                        LeaveSessionRequest.newBuilder()
+                                .setSessionId(currentSessionId)
+                                .build()
+                )
+                .build();
+
+        sendMessage(message);
     }
 
     private synchronized void sendFrame(byte[] payload) throws IOException {
-        if (payload.length > 65536) {
+        if (payload.length > MAX_FRAME_SIZE) {
             throw new IOException("Frame too large");
         }
 
@@ -224,15 +382,26 @@ public class NetworkClient {
 
     private synchronized void sendMessage(ClientMessage clientMsg) {
         try {
-            sequenceNumber++;
+            long sequence = ++sequenceNumber;
+
             ClientMessage finalMsg = clientMsg.toBuilder()
-                    .setSequence(sequenceNumber)
+                    .setSequence(sequence)
                     .build();
-            byte[] payload = finalMsg.toByteArray();
-            sendFrame(payload);
+
+            if (finalMsg.hasLeaveSessionRequest()) {
+                pendingLeaveSequence = sequence;
+            }
+
+            sendFrame(finalMsg.toByteArray());
+
             System.out.println("Sent message: " + finalMsg);
-        } catch (Exception e) {
-            System.err.println("Error sending message: " + clientMsg);
+
+        } catch (IOException e) {
+            if (clientMsg.hasLeaveSessionRequest()) {
+                pendingLeaveSequence = 0;
+            }
+
+            System.err.println("Error sending message: " + e.getMessage());
         }
     }
 
@@ -246,22 +415,68 @@ public class NetworkClient {
 
     private synchronized void trackSession(ServerMessage serverMessage) {
         if (serverMessage.hasStateUpdate()) {
-            currentSessionId = serverMessage.getStateUpdate().getSessionId();
+            StateUpdate update = serverMessage.getStateUpdate();
+
+            currentSessionId = update.getSessionId();
+            latestStateUpdate = update;
+
         } else if (serverMessage.hasLeaveSessionResponse()) {
-            if (serverMessage.getLeaveSessionResponse().getSessionId().equals(currentSessionId)) {
+            String responseSessionId =
+                    serverMessage.getLeaveSessionResponse().getSessionId();
+
+            if (pendingLeaveSequence != 0
+                    && serverMessage.getInReplyTo() == pendingLeaveSequence
+                    && responseSessionId.equals(currentSessionId)) {
+
+                System.out.println("Successfully left session: "
+                        + currentSessionId);
+
                 currentSessionId = "";
+                latestStateUpdate = null;
+                pendingLeaveSequence = 0;
+            }
+
+        } else if (serverMessage.hasErrorResponse()) {
+            if (pendingLeaveSequence != 0
+                    && serverMessage.getInReplyTo() == pendingLeaveSequence) {
+
+                pendingLeaveSequence = 0;
+                System.out.println("Leave request failed; still in session.");
             }
         }
     }
 
     public synchronized void disconnect() {
         connected = false;
+
         currentSessionId = "";
+        playerId = "";
+        latestStateUpdate = null;
+        sequenceNumber = 0;
+        pendingLeaveSequence = 0;
 
         try {
             if (socket != null && !socket.isClosed()) {
                 socket.close();
             }
-        } catch (Exception ignored) {}
+        } catch (IOException e) {
+            System.err.println("Error closing connection: " + e.getMessage());
+        }
+
+        socket = null;
+        inputStream = null;
+        outputStream = null;
+    }
+
+    public boolean isConnected() {
+        return connected;
+    }
+
+    public String getPlayerId() {
+        return playerId;
+    }
+
+    public StateUpdate getLatestStateUpdate() {
+        return latestStateUpdate;
     }
 }

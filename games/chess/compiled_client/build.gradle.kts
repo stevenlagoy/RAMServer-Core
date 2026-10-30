@@ -25,6 +25,7 @@ java {
 
 dependencies {
     implementation("com.google.protobuf:protobuf-java:4.36.2")
+    implementation("com.googlecode.lanterna:lanterna:3.1.5")
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
