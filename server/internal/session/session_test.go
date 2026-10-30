@@ -12,7 +12,6 @@ import (
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
 	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
-	"github.com/stevenlagoy/ramserver-core/server/rulesets/chess"
 )
 
 // fakeSender records every frame a Session sends to one member
@@ -64,7 +63,7 @@ func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 		t.Fatalf("err = %v, want ErrLobbyFull", err)
 	}
 
-	s.SetReady(ctx, "a", true) // starts the match; turn order is copied from s.order
+	s.SetReady(ctx, "a", true, 2) // starts the match; turn order is copied from s.order
 	state := a.next(t).GetStateUpdate()
 	if state.GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
 		t.Fatalf("expected match to start, got %v", state)
@@ -74,8 +73,7 @@ func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 	}
 }
 
-// Joins refused by the session reach clients as ERROR_CODE_SESSION_NOT_JOINABLE. Tested here
-// because a match cannot yet be started over the protocol.
+// Joins refused by the session reach clients as ERROR_CODE_SESSION_NOT_JOINABLE
 func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
 	s, ctx := startSession(t, &testgame.StubGame{})
 	a := newFakeSender()
@@ -83,7 +81,7 @@ func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.next(t)
-	s.SetReady(ctx, "a", true)
+	s.SetReady(ctx, "a", true, 2)
 	if state := a.next(t).GetStateUpdate(); state.GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
 		t.Fatalf("expected match to start, got %v", state)
 	}
@@ -102,45 +100,67 @@ func TestFullLobbyIsNotJoinable(t *testing.T) {
 	}
 }
 
-// Tests that a MatchResult is received in a real game implementation.
-func TestChessCheckmateEndsTheMatch(t *testing.T) {
-	s, ctx := startSession(t, &chess.Game{})
-	white, black := newFakeSender(), newFakeSender()
-	if err := s.Join(ctx, "white", "", 1, white); err != nil { // first to join plays white
+// The stub ends after four actions with its own result type, which the core must pass on through the
+// MatchResult interface rather than asserting a concrete type
+func TestMatchEndBroadcastsMatchResult(t *testing.T) {
+	s, ctx := startSession(t, &testgame.StubGame{})
+	a, b := newFakeSender(), newFakeSender()
+	if err := s.Join(ctx, "a", "", 1, a); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Join(ctx, "black", "", 1, black); err != nil {
+	if err := s.Join(ctx, "b", "", 1, b); err != nil {
 		t.Fatal(err)
 	}
-	s.SetReady(ctx, "white", true)
-	s.SetReady(ctx, "black", true)
-	for _, f := range []*fakeSender{white, black} {
+	s.SetReady(ctx, "a", true, 2)
+	s.SetReady(ctx, "b", true, 2)
+	for _, f := range []*fakeSender{a, b} {
 		for f.next(t).GetStateUpdate().GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
 		}
 	}
 
-	// Fool's mate: 1. f3 e5 2. g4 Qh4#
-	moves := []struct{ actor, uci string }{
-		{"white", "f2f3"}, {"black", "e7e5"}, {"white", "g2g4"}, {"black", "d8h4"},
-	}
-	for i, m := range moves {
-		seq := uint64(10 + i)
-		s.Submit(ctx, game.Action{ID: seq, ActorID: m.actor, Payload: []byte(m.uci)})
-		for _, f := range []*fakeSender{white, black} {
+	for i, actor := range []string{"a", "b", "a", "b"} { // the stub alternates turns in join order
+		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: actor, Payload: []byte("NoOp")})
+		for _, f := range []*fakeSender{a, b} {
 			if got := f.next(t); got.GetStateUpdate() == nil {
-				t.Fatalf("move %s: expected a StateUpdate, got %v", m.uci, got)
+				t.Fatalf("action %d: expected a StateUpdate, got %v", i, got)
 			}
 		}
 	}
 
-	for name, f := range map[string]*fakeSender{"white": white, "black": black} {
+	for name, f := range map[string]*fakeSender{"a": a, "b": b} {
 		got := f.next(t)
 		result := got.GetMatchResult()
 		if result == nil || got.GetInReplyTo() != 0 {
-			t.Fatalf("%s: expected an unsolicited MatchResult after checkmate, got %v", name, got)
+			t.Fatalf("%s: expected an unsolicited MatchResult, got %v", name, got)
 		}
-		if result.GetDraw() || len(result.GetWinnerPlayerIds()) != 1 || result.GetWinnerPlayerIds()[0] != "black" {
-			t.Fatalf("%s: expected black to win, got %v", name, result)
+		if !result.GetDraw() || len(result.GetWinnerPlayerIds()) != 0 {
+			t.Fatalf("%s: expected a draw, got %v", name, result)
+		}
+	}
+}
+
+func TestLeaveOfLastUnreadyMemberStartsMatch(t *testing.T) {
+	s, ctx := startSession(t, &testgame.StubGame{})
+	senders := map[string]*fakeSender{"a": newFakeSender(), "b": newFakeSender(), "c": newFakeSender()}
+	for _, id := range []string{"a", "b", "c"} {
+		if err := s.Join(ctx, id, "", 1, senders[id]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.SetReady(ctx, "a", true, 2)
+	s.SetReady(ctx, "b", true, 2)
+	s.Leave(ctx, "c")
+
+	for _, id := range []string{"a", "b"} {
+		var got *pb.ServerMessage
+		for got.GetStateUpdate().GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
+			got = senders[id].next(t) // fails if the match never starts
+		}
+		if got.GetInReplyTo() != 0 {
+			t.Fatalf("%s: expected an unsolicited start, got %v", id, got)
+		}
+		if order := got.GetStateUpdate().GetPlayerOrder(); len(order) != 2 || order[0] != "a" || order[1] != "b" {
+			t.Fatalf("%s: player_order = %v, want [a b]", id, order)
 		}
 	}
 }
@@ -163,7 +183,7 @@ func startMatch(t *testing.T, s *Session, ctx context.Context, ids ...string) (m
 		}
 	}
 	for _, id := range ids {
-		s.SetReady(ctx, id, true)
+		s.SetReady(ctx, id, true, 2)
 	}
 	started := make(map[string]*pb.StateUpdate, len(ids))
 	for id, f := range senders {
@@ -180,25 +200,6 @@ func TestEachMemberReceivesOnlyTheirOwnView(t *testing.T) {
 	for id, state := range started {
 		if got, want := string(state.GetEncodedView()), "secret-of-"+id; got != want {
 			t.Fatalf("%s's encoded_view = %q, want %q", id, got, want)
-		}
-	}
-}
-
-func TestChessViewIsTheCurrentPosition(t *testing.T) {
-	const startFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-	s, ctx := startSession(t, &chess.Game{})
-	senders, started := startMatch(t, s, ctx, "white", "black") // first to join plays white
-	for id, state := range started {
-		if got := string(state.GetEncodedView()); got != startFEN {
-			t.Fatalf("%s's starting view = %q, want %q", id, got, startFEN)
-		}
-	}
-
-	s.Submit(ctx, game.Action{ID: 5, ActorID: "white", Payload: []byte("e2e4")})
-	const afterE4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
-	for _, f := range senders {
-		if got := string(f.next(t).GetStateUpdate().GetEncodedView()); got != afterE4 {
-			t.Fatalf("view after e2e4 = %q, want %q", got, afterE4)
 		}
 	}
 }

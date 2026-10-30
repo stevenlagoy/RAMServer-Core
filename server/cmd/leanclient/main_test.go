@@ -65,6 +65,15 @@ func TestParseCommand(t *testing.T) {
 			a := m.GetActionRequest()
 			return a.GetSessionId() == "s1" && string(a.GetEncodedAction()) == "e2 e4"
 		}},
+		{"ready", "s1", func(m *pb.ClientMessage) bool {
+			r := m.GetSetReadyRequest()
+			return r.GetSessionId() == "s1" && r.GetReady()
+		}},
+		{"ready false", "s1", func(m *pb.ClientMessage) bool {
+			r := m.GetSetReadyRequest()
+			return r != nil && !r.GetReady()
+		}},
+		{"legal", "s1", func(m *pb.ClientMessage) bool { return m.GetLegalActionsRequest().GetSessionId() == "s1" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.line, func(t *testing.T) {
@@ -84,7 +93,7 @@ func TestParseCommandRaw(t *testing.T) {
 }
 
 func TestParseCommandErrors(t *testing.T) {
-	for _, line := range []string{"auth", "auth Alice p1", "create", "create stub extra", "join stub", "join stub s1 extra", "leave", "action move", "action", "raw", "dance"} {
+	for _, line := range []string{"auth", "auth Alice p1", "create", "create stub extra", "join stub", "join stub s1 extra", "leave", "action move", "action", "ready", "legal", "raw", "dance"} {
 		if _, _, err := parseCommand(line, ""); err == nil {
 			t.Errorf("parseCommand(%q) succeeded with no session, want an error", line)
 		}
