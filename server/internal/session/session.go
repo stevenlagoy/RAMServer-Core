@@ -338,10 +338,11 @@ func (s *Session) viewFor(memberID string) transport.StateUpdate {
 		GameID:    s.GameName,
 		Status:    transport.StatusWaiting,
 		Players:   players,
-		// TODO: StateVersion, and EncodedView once Game.ViewFor returns game-encoded bytes
+		// TODO: StateVersion
 	}
 	if s.current != nil {
 		view.Status = transport.StatusInProgress
+		view.EncodedView = s.current.ViewFor(memberID)
 		view.PlayerOrder = s.current.RosterOrder
 		if active := s.current.Game.ActiveTurn(s.current.State); len(active) == 1 {
 			view.ActivePlayerID = active[0]
