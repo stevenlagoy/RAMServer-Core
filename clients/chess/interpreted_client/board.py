@@ -31,7 +31,7 @@ def load_svg(path: Path, size: int) -> Surface:
     which one to use, so the native load size varies between machines. Rewriting width/height to the
     target size keeps the result sharp where they are honored; the final scale makes it exact everywhere.
     """
-    svg = path.read_text()
+    svg = path.read_text(encoding="utf-8")
     svg = re.sub(r'(<svg\b[^>]*?\s)width="[^"]*"', rf'\g<1>width="{size}"', svg, count=1)
     svg = re.sub(r'(<svg\b[^>]*?\s)height="[^"]*"', rf'\g<1>height="{size}"', svg, count=1)
     sprite = pygame.image.load(io.BytesIO(svg.encode()), path.name)
