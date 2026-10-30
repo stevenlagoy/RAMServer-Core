@@ -1,14 +1,15 @@
 package match
 
 import (
+	"bytes"
 	"errors"
 	"github.com/stevenlagoy/ramserver-core/server/game"
-	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"testing"
 )
 
 func TestMatchFlow(t *testing.T) {
-	g := &testgame.StubGame{EndAfter: 2}
+	g := &StubGame.StubGame{EndAfter: 2}
 	roster := []string{"p1", "p2"}
 	roles := map[string]game.Role{
 		"p1": game.RolePlayer,
@@ -53,7 +54,7 @@ func TestMatchFlow(t *testing.T) {
 }
 
 func TestLegalActions(t *testing.T) {
-	g := &testgame.StubGame{EndAfter: 4}
+	g := &StubGame.StubGame{EndAfter: 4}
 	roster := []string{"p1"}
 	roles := map[string]game.Role{
 		"p1": game.RolePlayer,
@@ -71,9 +72,12 @@ func TestLegalActions(t *testing.T) {
 		t.Errorf("expected no legal actions for nonexistent player, got %v: ", inactiveActions)
 	}
 
+	expect1 := []byte{0, 0, 0, 0, 0, 0, 0, 0}
+	expect2 := []byte{0, 0, 0, 0, 0, 0, 0, 1}
+
 	view := m.ViewFor("p1")
-	if view != 0 {
-		t.Errorf("expected view state to be 0, got %v", view)
+	if !bytes.Equal(view, expect1) {
+		t.Errorf("expected view state to be [0 0 0 0 0 0 0 0], got %v", view)
 	}
 
 	if err := m.ApplyAction(game.Action{ActorID: "p1"}); err != nil {
@@ -81,7 +85,8 @@ func TestLegalActions(t *testing.T) {
 	}
 
 	viewAfter := m.ViewFor("p1")
-	if viewAfter != 1 {
-		t.Errorf("expected view state to be 1, got %v", viewAfter)
+
+	if !bytes.Equal(viewAfter, expect2) {
+		t.Errorf("expected view state to be [0 0 0 0 0 0 0 1], got %v", viewAfter)
 	}
 }

@@ -3,7 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
-	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"sync"
 	"testing"
 )
@@ -29,7 +29,7 @@ func TestCreateAndGet(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	g := &testgame.StubGame{}
+	g := &StubGame.StubGame{}
 	s, err := st.Create(ctx, "sess-1", "chess", g, true)
 	if err != nil {
 		t.Fatalf("err creating session: %v", err)
@@ -59,7 +59,7 @@ func TestCreateDuplicateID(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	g := &testgame.StubGame{}
+	g := &StubGame.StubGame{}
 	_, err := st.Create(ctx, "sess-1", "chess", g, true)
 	if err != nil {
 		t.Fatalf("err creating session: %v", err)
@@ -80,7 +80,7 @@ func TestList(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	g := &testgame.StubGame{}
+	g := &StubGame.StubGame{}
 	st.Create(ctx, "sess-1", "chess", g, true)
 	st.Create(ctx, "sess-2", "chess", g, false)
 	st.Create(ctx, "sess-3", "checkers", g, true)
@@ -115,7 +115,7 @@ func TestRemove(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	g := &testgame.StubGame{}
+	g := &StubGame.StubGame{}
 	st.Create(ctx, "sess-1", "chess", g, true)
 
 	_, ok := st.Get("sess-1")
@@ -156,7 +156,7 @@ func TestSessionStoreConcurrency(t *testing.T) {
 				gameName = "checkers"
 			}
 
-			_, _ = st.Create(ctx, fmt.Sprintf("s-%d", id), gameName, &testgame.StubGame{}, id%3 == 0)
+			_, _ = st.Create(ctx, fmt.Sprintf("s-%d", id), gameName, &StubGame.StubGame{}, id%3 == 0)
 		}(i)
 	}
 	wg.Wait()
