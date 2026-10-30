@@ -1,6 +1,6 @@
-// Package e2e plays real games through the server, one file per game, to check the responses clients get.
+// Package integration plays real games through the server core, one file per game, to check the messages players receive.
 // Ruleset unit tests stay with each ruleset, and the server's own tests use the stub game.
-package e2e
+package integration
 
 import (
 	"context"
