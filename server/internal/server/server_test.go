@@ -5,13 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"io"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
-	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
@@ -36,7 +36,7 @@ func dialTestClient(t *testing.T, addr string) net.Conn {
 	t.Helper()
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		t.Fatalf("dial %s: %v", addr, err)
+		t.Fatalf("failed to dial %s: %v", addr, err)
 	}
 	t.Cleanup(func() { conn.Close() })
 	return conn
@@ -72,7 +72,7 @@ func startTestServer(t *testing.T, cfg ServerConfig) (string, func()) {
 	go func() {
 		defer close(done)
 		games := game.NewRegistry()
-		games.Register("stub", func() game.Game { return &testgame.StubGame{} })
+		games.Register("stub", func() game.Game { return &StubGame.StubGame{} })
 		Serve(ctx, ln, cfg, games)
 	}()
 	stop := func() {

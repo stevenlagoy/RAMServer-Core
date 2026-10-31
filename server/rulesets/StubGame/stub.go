@@ -1,4 +1,4 @@
-package testgame
+package StubGame
 
 import (
 	"encoding/binary"
@@ -20,7 +20,7 @@ type stubState struct {
 }
 
 func (g *StubGame) Roles() []game.RoleSpec {
-	return []game.RoleSpec{{Name: game.RolePlayer, Min: 1, Max: 0}}
+	return []game.RoleSpec{{Name: game.RolePlayer, Min: 1, Max: 2}}
 }
 
 func (g *StubGame) NewState(rosterOrder []string, roles map[string]game.Role) game.GameState {

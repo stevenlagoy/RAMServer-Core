@@ -3,10 +3,10 @@ package transport
 import (
 	"errors"
 	"fmt"
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	"log"
 	"strings"
 
-	"github.com/stevenlagoy/ramserver-core/server/game"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"

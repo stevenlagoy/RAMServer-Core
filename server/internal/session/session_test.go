@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"testing"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
-	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 	"github.com/stevenlagoy/ramserver-core/server/rulesets/chess"
 )
@@ -38,10 +38,105 @@ func (f *fakeSender) next(t *testing.T) *pb.ServerMessage {
 }
 
 // oneSeatGame allows a single player and nothing else
-type oneSeatGame struct{ testgame.StubGame }
+type oneSeatGame struct{ StubGame.StubGame }
 
 func (g *oneSeatGame) Roles() []game.RoleSpec {
 	return []game.RoleSpec{{Name: game.RolePlayer, Min: 1, Max: 1}}
+}
+
+// TestSessionPipeline_JoinReadyLeave starts a session with a mock owner and mock sender to verify joining a session,
+// tests users readying up, and a user leaving.
+func TestSessionPipeline_JoinReadyLeave(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ownerSender := newFakeSender()
+	clientSender := newFakeSender()
+
+	g := &StubGame.StubGame{}
+
+	sess := NewSession("session-1", "TestGame", g, true)
+
+	go sess.Run(ctx)
+
+	errOwnerJoin := sess.Join(ctx, "owner-1", "Alice", 2, ownerSender)
+	if errOwnerJoin != nil {
+		t.Fatalf("unexpected error when owner-1 joined: %v", errOwnerJoin)
+	}
+
+	errJoin := sess.Join(ctx, "client-2", "Bob", 2, clientSender)
+	if errJoin != nil {
+		t.Fatalf("unexpected error when client-2 joined: %v", errJoin)
+	}
+
+	if len(sess.members) != 2 {
+		t.Errorf("expected 2 members in sessions, got %d", len(sess.members))
+	}
+
+	if _, exists := sess.members["client-2"]; !exists {
+		t.Error("expected client-2 to exist in member map")
+	}
+
+	_ = ownerSender.next(t)
+
+	// Ready State Check
+	sess.SetReady(ctx, "owner-1", true)
+	sess.SetReady(ctx, "client-2", true)
+
+	_ = ownerSender.next(t)
+	_ = clientSender.next(t)
+
+	// Client Leave Check
+	// TODO: Clarify leave behavior in standup
+	sess.Leave(ctx, "client-2")
+
+	//if len(sess.members) != 1 {
+	//	t.Errorf("expected 1 member left in session, got %d", len(sess.members))
+	//}
+
+	leaveMsg := ownerSender.next(t)
+	if leaveMsg == nil {
+		t.Error("expected owner to receive state update after client-2 left")
+	}
+}
+
+// TestSessionJoin_RejectFull
+func TestSessionJoin_RejectFull(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ownerSender := newFakeSender()
+	clientSender := newFakeSender()
+	rejectSender := newFakeSender()
+
+	g := &StubGame.StubGame{}
+
+	sess := NewSession("session-1", "TestGame", g, true)
+
+	go sess.Run(ctx)
+
+	errOwnerJoin := sess.Join(ctx, "owner-1", "Alice", 1, ownerSender)
+	if errOwnerJoin != nil {
+		t.Fatalf("unexpected error when owner-1 joined: %v", errOwnerJoin)
+	}
+
+	errJoin := sess.Join(ctx, "client-2", "Bob", 2, clientSender)
+	if errJoin != nil {
+		t.Fatalf("unexpected error when client-2 joined: %v", errJoin)
+	}
+
+	if len(sess.members) != 2 {
+		t.Errorf("expected 2 members in sessions, got %d", len(sess.members))
+	}
+
+	if _, exists := sess.members["client-2"]; !exists {
+		t.Error("expected client-2 to exist in member map")
+	}
+
+	errReject := sess.Join(ctx, "client-3", "Bill", 3, rejectSender)
+	if errReject == nil {
+		t.Error("expected error when client joins full session")
+	}
 }
 
 func startSession(t *testing.T, g game.Game) (*Session, context.Context) {
@@ -77,7 +172,7 @@ func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 // Joins refused by the session reach clients as ERROR_CODE_SESSION_NOT_JOINABLE. Tested here
 // because a match cannot yet be started over the protocol.
 func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
-	s, ctx := startSession(t, &testgame.StubGame{})
+	s, ctx := startSession(t, &StubGame.StubGame{})
 	a := newFakeSender()
 	if err := s.Join(ctx, "a", "", 1, a); err != nil {
 		t.Fatal(err)
@@ -146,7 +241,7 @@ func TestChessCheckmateEndsTheMatch(t *testing.T) {
 }
 
 // secretGame shows each member only their own secret, like a hand of cards
-type secretGame struct{ testgame.StubGame }
+type secretGame struct{ StubGame.StubGame }
 
 func (g *secretGame) ViewFor(_ game.GameState, memberID string) []byte {
 	return []byte("secret-of-" + memberID)

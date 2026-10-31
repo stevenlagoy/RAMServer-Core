@@ -136,6 +136,19 @@ go test -race ./...
 If PowerShell blocks any script, run:
 `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
 
+`leanclients.ps1 [count] [leanclient flags...]` opens one pane per client, named Player1 to PlayerN, and passes any extra flags (such as `-addr`) to every client. The server allows 4 connections per IP address by default (`MaxConnectionsOneIP`), so more than 4 local clients are refused.
+
+## Branches
+
+| Branch     | Owners   | Scope                           |
+|------------|----------|---------------------------------|
+| `main`     | All four | Protected; requires 4 approvals |
+| `server`   | All four | `server/`, `proto/`             |
+| `client-1` | Pair TBD | `clients/client-1/`             |
+| `client-2` | Pair TBD | `clients/client-2/`             |
+
+Rebase your branch onto `main` before opening a pull request.
+
 ## Documentation
 
 - [Wire protocol specification](docs/protocol.md)
