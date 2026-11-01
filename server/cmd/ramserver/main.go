@@ -10,7 +10,7 @@ import (
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/server"
-	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"github.com/stevenlagoy/ramserver-core/server/rulesets/chess"
 )
 
@@ -35,7 +35,7 @@ func main() {
 	games := game.NewRegistry()
 	games.Register("chess", func() game.Game { return &chess.Game{} })
 	if os.Getenv("RAMSERVER_STUB_GAME") != "" {
-		games.Register("stub", func() game.Game { return &testgame.StubGame{} }) // for manual testing with leanclient
+		games.Register("stub", func() game.Game { return &StubGame.StubGame{} }) // for manual testing with leanclient
 	}
 	if err := server.Serve(ctx, listener, server.DefaultConfig(), games); err != nil {
 		log.Fatal(err)
