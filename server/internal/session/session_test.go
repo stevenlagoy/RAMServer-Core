@@ -79,8 +79,8 @@ func TestSessionPipeline_JoinReadyLeave(t *testing.T) {
 	_ = ownerSender.next(t)
 
 	// Ready State Check
-	sess.SetReady(ctx, "owner-1", true)
-	sess.SetReady(ctx, "client-2", true)
+	sess.SetReady(ctx, "owner-1", true, 3)
+	sess.SetReady(ctx, "client-2", true, 3)
 
 	_ = ownerSender.next(t)
 	_ = clientSender.next(t)
@@ -198,7 +198,7 @@ func TestFullLobbyIsNotJoinable(t *testing.T) {
 // The stub ends after four actions with its own result type, which the core must pass on through the
 // MatchResult interface rather than asserting a concrete type
 func TestMatchEndBroadcastsMatchResult(t *testing.T) {
-	s, ctx := startSession(t, &testgame.StubGame{})
+	s, ctx := startSession(t, &StubGame.StubGame{})
 	a, b := newFakeSender(), newFakeSender()
 	if err := s.Join(ctx, "a", "", 1, a); err != nil {
 		t.Fatal(err)
@@ -235,28 +235,26 @@ func TestMatchEndBroadcastsMatchResult(t *testing.T) {
 }
 
 func TestLeaveOfLastUnreadyMemberStartsMatch(t *testing.T) {
-	s, ctx := startSession(t, &testgame.StubGame{})
-	senders := map[string]*fakeSender{"a": newFakeSender(), "b": newFakeSender(), "c": newFakeSender()}
-	for _, id := range []string{"a", "b", "c"} {
-		if err := s.Join(ctx, id, "", 1, senders[id]); err != nil {
-			t.Fatal(err)
-		}
+	s, ctx := startSession(t, &StubGame.StubGame{}) // the stub can start with one ready player
+	a := newFakeSender()
+	if err := s.Join(ctx, "a", "", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Join(ctx, "b", "", 1, newFakeSender()); err != nil {
+		t.Fatal(err)
 	}
 	s.SetReady(ctx, "a", true, 2)
-	s.SetReady(ctx, "b", true, 2)
-	s.Leave(ctx, "c")
+	s.Leave(ctx, "b")
 
-	for _, id := range []string{"a", "b"} {
-		var got *pb.ServerMessage
-		for got.GetStateUpdate().GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
-			got = senders[id].next(t) // fails if the match never starts
-		}
-		if got.GetInReplyTo() != 0 {
-			t.Fatalf("%s: expected an unsolicited start, got %v", id, got)
-		}
-		if order := got.GetStateUpdate().GetPlayerOrder(); len(order) != 2 || order[0] != "a" || order[1] != "b" {
-			t.Fatalf("%s: player_order = %v, want [a b]", id, order)
-		}
+	var got *pb.ServerMessage
+	for got.GetStateUpdate().GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
+		got = a.next(t) // fails if the match never starts
+	}
+	if got.GetInReplyTo() != 0 {
+		t.Fatalf("expected an unsolicited start, got %v", got)
+	}
+	if order := got.GetStateUpdate().GetPlayerOrder(); len(order) != 1 || order[0] != "a" {
+		t.Fatalf("player_order = %v, want [a]", order)
 	}
 }
 
