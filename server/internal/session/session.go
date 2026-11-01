@@ -16,9 +16,6 @@ type Sender interface {
 	Send(message []byte)
 }
 
-// Automatically mark clients as ready, for testing
-var AutoReady bool
-
 // Once client's participation in a Session's lobby.
 type Member struct {
 	ClientID    string
@@ -94,6 +91,7 @@ type leaveMsg struct {
 type setReadyMsg struct {
 	clientID string
 	ready    bool
+	seq      uint64 // request sequence, echoed on the requester's reply
 }
 type legalMovesMsg struct {
 	clientID string
@@ -133,10 +131,11 @@ func (s *Session) Leave(ctx context.Context, clientID string) {
 	}
 }
 
-// Records whether clientID considers themself ready to start
-func (s *Session) SetReady(ctx context.Context, clientID string, ready bool) {
+// Records whether clientID considers themself ready to start. seq is the SetReadyRequest's sequence:
+// the requester's copy of the resulting StateUpdate, or its ErrorResponse, replies to it.
+func (s *Session) SetReady(ctx context.Context, clientID string, ready bool, seq uint64) {
 	select {
-	case s.inbox <- sessionMsg{setReady: &setReadyMsg{clientID: clientID, ready: ready}}:
+	case s.inbox <- sessionMsg{setReady: &setReadyMsg{clientID: clientID, ready: ready, seq: seq}}:
 	case <-ctx.Done():
 	}
 }
@@ -149,7 +148,7 @@ func (s *Session) Submit(ctx context.Context, action game.Action) {
 	}
 }
 
-// Returns the actions clientID may currently take.
+// Returns the actions clientID may currently take. Empty before the match starts.
 func (s *Session) LegalMoves(ctx context.Context, clientID string) []game.ActionSpec {
 	reply := make(chan []game.ActionSpec, 1)
 	select {
@@ -211,12 +210,9 @@ func (s *Session) handleJoin(j *joinMsg) {
 	if _, exists := s.members[j.clientID]; !exists {
 		s.order = append(s.order, j.clientID) // only after the join is accepted, so a rejected joiner never gets a turn
 	}
-	s.members[j.clientID] = &Member{ClientID: j.clientID, DisplayName: j.displayName, Sender: j.sender, Role: role, Ready: AutoReady}
+	s.members[j.clientID] = &Member{ClientID: j.clientID, DisplayName: j.displayName, Sender: j.sender, Role: role}
 	j.reply <- nil
 	s.broadcastState(j.clientID, j.seq)
-	if AutoReady && s.readyToStart() { // Testing only: no ready message exists yet
-		s.startMatch()
-	}
 }
 
 // Picks the first role the game declares that still has room. Returns "" if every role is at capacity.
@@ -247,6 +243,10 @@ func (s *Session) handleLeave(l *leaveMsg) {
 	if len(s.members) == 0 {
 		return // caller removes Session from store
 	}
+	if s.current == nil && s.readyToStart() {
+		s.startMatch("", 0) // the leaver was the last member not ready
+		return
+	}
 	s.broadcastUnsolicitedState()
 }
 
@@ -255,12 +255,18 @@ func (s *Session) handleSetReady(r *setReadyMsg) {
 	if !ok {
 		return
 	}
-	member.Ready = r.ready
-	if s.current == nil && s.readyToStart() {
-		s.startMatch()
+	if s.current != nil {
+		perr := transport.NewError(transport.CodeInvalidState, "the match has already started")
+		perr.SessionID = s.ID
+		member.Sender.Send(transport.EncodeError(r.seq, perr))
 		return
 	}
-	s.broadcastUnsolicitedState()
+	member.Ready = r.ready
+	if s.readyToStart() {
+		s.startMatch(r.clientID, r.seq)
+		return
+	}
+	s.broadcastState(r.clientID, r.seq)
 }
 
 func (s *Session) readyToStart() bool {
@@ -273,13 +279,15 @@ func (s *Session) readyToStart() bool {
 	return s.Game.ReadyToStart(roster, ready)
 }
 
-func (s *Session) startMatch() {
+// Starts the match and broadcasts the first in-progress state. requesterID's copy replies to seq,
+// for the SetReadyRequest that completed readiness; pass "" and 0 when no request caused the start
+func (s *Session) startMatch(requesterID string, seq uint64) {
 	roles := make(map[string]game.Role, len(s.members))
 	for id, m := range s.members {
 		roles[id] = m.Role
 	}
 	s.current = match.NewMatch(s.Game, append([]string(nil), s.order...), roles) // copy order
-	s.broadcastUnsolicitedState()
+	s.broadcastState(requesterID, seq)
 }
 
 func (s *Session) handleSubmit(action game.Action) {

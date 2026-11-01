@@ -16,8 +16,8 @@ Example:
 
 ```text
 Connected to 127.0.0.1:9000
-[2026-10-11 00:32:22] -> CONNECT   sequence:1 connect_request:{protocol_version:"1.0" client_name:"leanclient"}
-[2026-10-11 00:32:22] <- CONNECTED in_reply_to:1 connect_response:{connection_id:"127.0.0.1:34686" server_protocol_version:"1.0"}
+[2026-10-11 00:32:22] -> CONNECT   sequence:1 connect_request:{protocol_version:"1.1" client_name:"leanclient"}
+[2026-10-11 00:32:22] <- CONNECTED in_reply_to:1 connect_response:{connection_id:"127.0.0.1:34686" server_protocol_version:"1.1"}
 [2026-10-11 00:32:22] -> AUTH      sequence:2 auth_request:{display_name:"Alice"}
 [2026-10-11 00:32:22] <- AUTHED    in_reply_to:2 auth_response:{player_id:"69e0ff70..." reconnect_token:"8b5d0494..."}
 Type a command, or help for the list. Exit with Ctrl+C or EOF.
@@ -39,12 +39,14 @@ raw hello
 | `join <game_id> <session_id>`           | `JoinSessionRequest`  | `session_id` should match an existing session.                                           |
 | `leave [session_id]`                    | `LeaveSessionRequest` | Defaults to the current session.                                                         |
 | `action <payload>`                      | `ActionRequest`       | Targets the current session. The rest of the line is sent as the `encoded_action` bytes. |
+| `ready [true\|false]`                   | `SetReadyRequest`     | Marks you ready (default) or not ready in the current session.                           |
+| `legal`                                 | `LegalActionsRequest` | Lists the actions you may take right now in the current session.                         |
 | `raw <text>`                            | arbitrary frame       | Sends the text as an arbitary frame, not protobuf. Useful for testing malformed input.   |
 | `help`                                  | n/a                   | Lists the commands.                                                                      |
 
 The client numbers each message's `sequence` automatically. It remembers the current session from the last `StateUpdate` it received, and forgets it after a `LeaveSessionResponse`.
 
-Matches cannot be started over the protocol yet, so `action` is currently dropped by the server after joining a session.
+A match starts once every player has sent `ready` (for chess, both players). Until then, `action` has no effect.
 
 ## Run one command
 
@@ -76,7 +78,7 @@ go run ./cmd/leanclient -version 2.0
 -send string
       run one command after the handshake, print one response, then exit
 -version string
-      protocol version sent in ConnectRequest (default "1.0")
+      protocol version sent in ConnectRequest (default "1.1")
 ```
 
 Go's standard `-h` / `--help` output is also available:
