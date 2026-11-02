@@ -28,7 +28,7 @@ func TestWaitingPhaseActionReturnsError(t *testing.T) {
 		t.Fatalf("expected waiting-phase ILLEGAL_ACTION response, got %v", rejected)
 	}
 
-	s.SetReady(ctx, "a", true)
+	s.SetReady(ctx, "a", true, 2)
 	started := a.next(t).GetStateUpdate()
 	if started == nil || started.GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS || started.GetStateVersion() != version+1 {
 		t.Fatalf("rejection mutated session state: got %v", started)
@@ -47,10 +47,10 @@ func TestWrongTurnRejectionHasNoBroadcast(t *testing.T) {
 	}
 	a.next(t)
 	b.next(t)
-	s.SetReady(ctx, "a", true)
+	s.SetReady(ctx, "a", true, 2)
 	a.next(t)
 	b.next(t)
-	s.SetReady(ctx, "b", true)
+	s.SetReady(ctx, "b", true, 2)
 	startedA, startedB := a.next(t).GetStateUpdate(), b.next(t).GetStateUpdate()
 	if startedA == nil || startedB == nil {
 		t.Fatal("expected start updates")
@@ -84,7 +84,7 @@ func TestMalformedActionCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.next(t)
-	s.SetReady(ctx, "a", true)
+	s.SetReady(ctx, "a", true, 2)
 	started := a.next(t).GetStateUpdate()
 	if started == nil {
 		t.Fatal("expected match to start")
@@ -110,7 +110,7 @@ func TestWrongSessionAndNonmemberRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.next(t)
-	s.SetReady(ctx, "a", true)
+	s.SetReady(ctx, "a", true, 2)
 	started := a.next(t).GetStateUpdate()
 	if started == nil {
 		t.Fatal("expected match to start")

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"net"
 	"testing"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/stevenlagoy/ramserver-core/server/game"
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
 	"github.com/stevenlagoy/ramserver-core/server/internal/server"
-	"github.com/stevenlagoy/ramserver-core/server/internal/testgame"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
 
@@ -65,6 +65,15 @@ func TestParseCommand(t *testing.T) {
 			a := m.GetActionRequest()
 			return a.GetSessionId() == "s1" && string(a.GetEncodedAction()) == "e2 e4"
 		}},
+		{"ready", "s1", func(m *pb.ClientMessage) bool {
+			r := m.GetSetReadyRequest()
+			return r.GetSessionId() == "s1" && r.GetReady()
+		}},
+		{"ready false", "s1", func(m *pb.ClientMessage) bool {
+			r := m.GetSetReadyRequest()
+			return r != nil && !r.GetReady()
+		}},
+		{"legal", "s1", func(m *pb.ClientMessage) bool { return m.GetLegalActionsRequest().GetSessionId() == "s1" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.line, func(t *testing.T) {
@@ -84,7 +93,7 @@ func TestParseCommandRaw(t *testing.T) {
 }
 
 func TestParseCommandErrors(t *testing.T) {
-	for _, line := range []string{"auth", "auth Alice p1", "create", "create stub extra", "join stub", "join stub s1 extra", "leave", "action move", "action", "raw", "dance"} {
+	for _, line := range []string{"auth", "auth Alice p1", "create", "create stub extra", "join stub", "join stub s1 extra", "leave", "action move", "action", "ready", "legal", "raw", "dance"} {
 		if _, _, err := parseCommand(line, ""); err == nil {
 			t.Errorf("parseCommand(%q) succeeded with no session, want an error", line)
 		}
@@ -103,7 +112,7 @@ func dialTestServer(t *testing.T) net.Conn {
 	go func() {
 		defer close(done)
 		games := game.NewRegistry()
-		games.Register("stub", func() game.Game { return &testgame.StubGame{} })
+		games.Register("stub", func() game.Game { return &StubGame.StubGame{} })
 		server.Serve(ctx, ln, server.DefaultConfig(), games)
 	}()
 	t.Cleanup(func() {

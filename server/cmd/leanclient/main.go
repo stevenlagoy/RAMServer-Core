@@ -32,6 +32,8 @@ const helpText = `Commands:
   join <game_id> <session_id>              join an existing session
   leave [session_id]                       leave a session (default: current session)
   action <payload>                         send ActionRequest to the current session
+  ready [true|false]                       send SetReadyRequest for the current session (default: true)
+  legal                                    send LegalActionsRequest for the current session
   raw <text>                               send text as an arbitrary frame (not protobuf)
   help                                     show this list`
 
@@ -82,6 +84,10 @@ func clientMessageKind(msg *pb.ClientMessage) string {
 		return "LEAVE"
 	case *pb.ClientMessage_ActionRequest:
 		return "ACTION"
+	case *pb.ClientMessage_SetReadyRequest:
+		return "READY"
+	case *pb.ClientMessage_LegalActionsRequest:
+		return "LEGAL"
 	default:
 		return "UNKNOWN"
 	}
@@ -102,6 +108,8 @@ func serverMessageKind(msg *pb.ServerMessage) string {
 		return "RESULT"
 	case *pb.ServerMessage_LeaveSessionResponse:
 		return "LEFT"
+	case *pb.ServerMessage_LegalActionsResponse:
+		return "ACTIONS"
 	default:
 		return "UNKNOWN"
 	}
@@ -173,6 +181,33 @@ func parseCommand(line, currentSession string) (msg *pb.ClientMessage, raw []byt
 		return &pb.ClientMessage{Payload: &pb.ClientMessage_ActionRequest{ActionRequest: &pb.ActionRequest{
 			SessionId:     currentSession,
 			EncodedAction: []byte(rest),
+		}}}, nil, nil
+	case "ready":
+		ready := true
+		switch {
+		case len(args) > 1:
+			return nil, nil, errors.New("usage: ready [true|false]")
+		case len(args) == 1 && args[0] == "false":
+			ready = false
+		case len(args) == 1 && args[0] != "true":
+			return nil, nil, errors.New("usage: ready [true|false]")
+		}
+		if currentSession == "" {
+			return nil, nil, errors.New("not in a session; create or join one first")
+		}
+		return &pb.ClientMessage{Payload: &pb.ClientMessage_SetReadyRequest{SetReadyRequest: &pb.SetReadyRequest{
+			SessionId: currentSession,
+			Ready:     ready,
+		}}}, nil, nil
+	case "legal":
+		if len(args) != 0 {
+			return nil, nil, errors.New("usage: legal")
+		}
+		if currentSession == "" {
+			return nil, nil, errors.New("not in a session; create or join one first")
+		}
+		return &pb.ClientMessage{Payload: &pb.ClientMessage_LegalActionsRequest{LegalActionsRequest: &pb.LegalActionsRequest{
+			SessionId: currentSession,
 		}}}, nil, nil
 	case "raw":
 		if rest == "" {
