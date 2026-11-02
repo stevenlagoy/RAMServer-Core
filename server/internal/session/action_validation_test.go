@@ -3,8 +3,8 @@ package session
 import (
 	"testing"
 
+	"github.com/stevenlagoy/ramserver-core/server/game"
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
 

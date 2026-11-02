@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/stevenlagoy/ramserver-core/server/internal/game"
+	"github.com/stevenlagoy/ramserver-core/server/game"
 )
 
 // Owns the lifetime of every active Session.

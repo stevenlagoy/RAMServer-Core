@@ -27,17 +27,17 @@ Every member holds exactly one primary role and two shared roles. Primary roles 
 #### Project Manager
 - Scopes work items and makes initial task assignments.
 - Schedules and conducts planning meetings; sets and publishes agendas.
+- Records minutes from in-person meetings.
 - Maintains the project vision, the requirements model, and the traceability between requirements and open issues.
 - Reviews all documentation for completeness and accuracy before a deliverable is submitted.
+- Communicates with external stakeholders and course evaluators on behalf of the team.
 - Owns this policy document and the course deliverable calendar.
 
-#### Protocol Designer
+#### Protocol Designer and Network Engineer
 - Specifies the wire protocol used for client-server communication, including message schemas, versioning rules, and error semantics.
 - Owns the .proto definitions and is a required reviewer on any pull request that modifies them.
 - Produces and maintains protocol documentation sufficient for a developer to write a conforming client without reading the server source.
 - Announces breaking protocol changes in the team Discord before the corresponding pull request is opened.
-
-#### Network Engineer
 - Designs and implements the transport and session layer between server and clients, including connection lifecycle, framing, timeouts, and disconnect handling.
 - Owns the server-side networking module and the shared client-side transport concerns.
 - Defines the reconnection and session-resume behavior if that stretch goal is pursued.
@@ -47,6 +47,8 @@ Every member holds exactly one primary role and two shared roles. Primary roles 
 - Defines the test strategy, the required test tiers, and the merge gate criteria in §9.
 - Maintains test fixtures and the adversarial test suite covering illegal, spoofed, and out-of-order client actions.
 - Owns the persistence schema and its migrations, since match and action-log integrity is verified through the same test harness.
+- Creates and administrates a requirements traceability matrix for all unit and end-to-end tests.
+- Delegates specific testing needs to other team members.
 
 ### 2.2 Shared roles (all members)
 
