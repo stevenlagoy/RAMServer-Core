@@ -2,9 +2,7 @@ package game
 
 import "errors"
 
-// ErrMalformedAction indicates that a game's action payload
-// could not be decoded.
 var (
-	ErrIllegalAction   = errors.New("illegal action")
-	ErrMalformedAction = errors.New("malformed action payload")
+	ErrIllegalAction   = errors.New("illegal action")   // ERROR_CODE_ILLEGAL_ACTION
+	ErrMalformedAction = errors.New("malformed action") // ERROR_CODE_MALFORMED_MESSAGE
 )

@@ -218,7 +218,7 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 		c.session = nil
 		c.Send(transport.EncodeLeaveSessionResponse(msg.Sequence, msg.SessionID))
 	case transport.KindAction:
-		if c.session == nil || c.session.ID != msg.SessionID {
+		if !c.inSession(msg) {
 			slog.Warn("action rejected",
 				"session_id", msg.SessionID,
 				"player_id", c.ID,
@@ -226,7 +226,6 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 				"error_code", transport.CodeNotInSession.String(),
 				"reason", "client not bound to requested session",
 			)
-			c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
 			return
 		}
 		action := msg.Action
