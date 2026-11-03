@@ -71,11 +71,11 @@ func (c *WebSocketNetConn) Close() error {
 }
 
 func (c *WebSocketNetConn) LocalAddr() net.Addr {
-	return c.conn.NetConn().LocalAddr()
+	return c.conn.UnderlyingConn().LocalAddr()
 }
 
 func (c *WebSocketNetConn) RemoteAddr() net.Addr {
-	return c.conn.NetConn().RemoteAddr()
+	return c.conn.UnderlyingConn().RemoteAddr()
 }
 
 func (c *WebSocketNetConn) SetDeadline(t time.Time) error {
