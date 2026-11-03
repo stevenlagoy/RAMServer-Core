@@ -18,5 +18,5 @@ RUN adduser -D -u 10001 ramserver
 WORKDIR /app
 COPY --from=build /out/ramserver /app/ramserver
 USER ramserver
-EXPOSE 9000
+EXPOSE 8080
 ENTRYPOINT ["/app/ramserver"]

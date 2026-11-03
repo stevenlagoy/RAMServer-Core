@@ -14,7 +14,7 @@ import (
 	"github.com/stevenlagoy/ramserver-core/server/rulesets/chess"
 )
 
-const defaultAddr = "127.0.0.1:9000"
+const defaultAddr = "127.0.0.1:8080"
 
 func main() {
 	addr := os.Getenv("RAMSERVER_ADDR")

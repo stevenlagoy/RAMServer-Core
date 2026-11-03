@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	defaultAddr = "127.0.0.1:9000"
+	defaultAddr = "127.0.0.1:8080"
 	maxFrame    = 64 << 10
 )
 
