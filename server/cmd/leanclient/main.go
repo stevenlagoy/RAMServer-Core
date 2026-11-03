@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/gorilla/websocket"
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
@@ -34,6 +35,23 @@ const helpText = `Commands:
   action <payload>                         send ActionRequest to the current session
   raw <text>                               send text as an arbitrary frame (not protobuf)
   help                                     show this list`
+
+func dialServer(addr string) (net.Conn, error) {
+	if strings.HasPrefix(addr, "ws://") || strings.HasPrefix(addr, "wss://") {
+		// Websocket
+		conn, resp, err := websocket.DefaultDialer.Dial(addr, nil)
+		if err != nil {
+			if resp != nil {
+				return nil, fmt.Errorf(
+					"WebSocket handshake failed (%s): %w", resp.Status, err,
+				)
+			}
+			return nil, err
+		}
+		return transport.NewWebSocketNetConn(conn), nil
+	}
+	return net.Dial("tcp", addr)
+}
 
 func writeFrame(w io.Writer, payload []byte) error {
 	if len(payload) > maxFrame {
@@ -332,7 +350,7 @@ func main() {
 	send := flag.String("send", "", "run one command after the handshake, print one response, then exit")
 	flag.Parse()
 
-	conn, err := net.Dial("tcp", *addr)
+	conn, err := dialServer(*addr)
 	if err != nil {
 		fmt.Println("Error connecting to server:", err)
 		return
