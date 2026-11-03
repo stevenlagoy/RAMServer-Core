@@ -14,12 +14,17 @@ import (
 	"github.com/stevenlagoy/ramserver-core/server/rulesets/chess"
 )
 
-const defaultAddr = "127.0.0.1:8080"
+const defaultPort = "8080"
 
 func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = defaultPort
+	}
+
 	addr := os.Getenv("RAMSERVER_ADDR")
 	if addr == "" {
-		addr = defaultAddr
+		addr = ":" + port
 	}
 
 	// Create a TCP listener
