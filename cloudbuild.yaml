@@ -1,3 +1,17 @@
+steps:
+  - name: gcr.io/cloud-builders/gcloud
+    id: Inspect-Source
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        echo "=== WORKSPACE ==="
+        pwd
+        ls -la
+        echo "=== SERVER ==="
+        ls -la server
+        echo "=== GO MODULE ==="
+        ls -la server/go.mod server/go.sum
 
 steps:
   - name: gcr.io/cloud-builders/docker
