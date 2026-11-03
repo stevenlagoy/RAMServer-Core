@@ -3,12 +3,17 @@
 FROM golang:1.24-alpine AS build
 COPY --from=bufbuild/buf:1.73.0 /usr/local/bin/buf /usr/local/bin/buf
 WORKDIR /src
-COPY server/go.mod server/go.sum server/
+
+# Copy go files and download modules
+COPY server/go.mod server/go.sum ./server/
 RUN cd server && go mod download
+
 # Generated protobuf code is gitignored, so generate it from the schema here
 COPY buf.yaml buf.gen.yaml ./
 COPY proto/ proto/
 RUN buf generate
+
+# Copy the rest of the server code
 COPY server/ server/
 WORKDIR /src/server
 RUN CGO_ENABLED=0 go build -o /out/ramserver ./cmd/ramserver
