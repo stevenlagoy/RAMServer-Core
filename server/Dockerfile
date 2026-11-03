@@ -19,6 +19,7 @@ WORKDIR /src/server
 RUN CGO_ENABLED=0 go build -o /out/ramserver ./cmd/ramserver
 
 FROM alpine:3.20
+WORKDIR /src/server
 RUN adduser -D -u 10001 ramserver
 WORKDIR /app
 COPY --from=build /out/ramserver /app/ramserver
