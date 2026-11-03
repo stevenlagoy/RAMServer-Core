@@ -4,6 +4,11 @@ FROM golang:1.24-alpine AS build
 COPY --from=bufbuild/buf:1.73.0 /usr/local/bin/buf /usr/local/bin/buf
 WORKDIR /src
 
+# Debug
+RUN echo "=== BUILD CONTEXT ===" && ls -la / && \
+    echo "=== SERVER DIRECTORY ===" && ls -la /server || true && \
+    echo "=== ROOT DIRECTORY ===" && ls -la /src
+
 # Copy go files and download modules
 COPY server/go.mod server/go.sum ./server/
 RUN cd server && go mod download
