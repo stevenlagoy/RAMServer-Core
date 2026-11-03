@@ -3,9 +3,13 @@ package session
 import (
 	"context"
 	"errors"
-	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
+
+	"sync/atomic"
 
 	"google.golang.org/protobuf/proto"
 
@@ -38,6 +42,11 @@ func (f *fakeSender) next(t *testing.T) *pb.ServerMessage {
 
 // oneSeatGame allows a single player and nothing else
 type oneSeatGame struct{ StubGame.StubGame }
+
+type validationTestGame struct {
+	StubGame.StubGame
+	applied atomic.Int32
+}
 
 func (g *oneSeatGame) Roles() []game.RoleSpec {
 	return []game.RoleSpec{{Name: game.RolePlayer, Min: 1, Max: 1}}
@@ -195,6 +204,166 @@ func TestFullLobbyIsNotJoinable(t *testing.T) {
 	}
 }
 
+func (g *validationTestGame) Validate(
+	_ game.GameState,
+	action game.Action,
+) error {
+	switch string(action.Payload) {
+	case "illegal":
+		return errors.New("illegal test action")
+	case "malformed":
+		return fmt.Errorf("%w: invalid test encoding", game.ErrMalformedAction)
+	}
+
+	return nil
+}
+
+func (g *validationTestGame) Apply(
+	state game.GameState,
+	action game.Action,
+) game.GameState {
+	g.applied.Add(1)
+	return g.StubGame.Apply(state, action)
+}
+
+func TestActionStateVersion(t *testing.T) {
+	g := &validationTestGame{}
+	s, ctx := startSession(t, g)
+	sender := newFakeSender()
+
+	// Join the session.
+	if err := s.Join(ctx, "a", "Alice", 1, sender); err != nil {
+		t.Fatal(err)
+	}
+	sender.next(t) // Consume the join StateUpdate.
+
+	// Start the match.
+	s.SetReady(ctx, "a", true, 2)
+	started := sender.next(t).GetStateUpdate()
+	if started == nil {
+		t.Fatal("expected StateUpdate when match starts")
+	}
+
+	initialVersion := started.GetStateVersion()
+
+	// Submit an illegal action.
+	s.Submit(ctx, game.Action{
+		ID:      2,
+		ActorID: "a",
+		Payload: []byte("illegal"),
+	}, s.ID, initialVersion, sender)
+
+	rejected := sender.next(t)
+	if rejected.GetInReplyTo() != 2 ||
+		rejected.GetErrorResponse().GetCode() != transport.CodeIllegalAction {
+		t.Fatalf("expected ILLEGAL_ACTION response, got %v", rejected)
+	}
+
+	if g.applied.Load() != 0 {
+		t.Fatal("illegal action was applied")
+	}
+
+	// Submit a legal action using the original version.
+	s.Submit(ctx, game.Action{
+		ID:      3,
+		ActorID: "a",
+		Payload: []byte("legal"),
+	}, s.ID, initialVersion, sender)
+
+	accepted := sender.next(t)
+	update := accepted.GetStateUpdate()
+	if update == nil {
+		t.Fatalf("expected StateUpdate, got %v", accepted)
+	}
+
+	if update.GetStateVersion() != initialVersion+1 {
+		t.Fatalf(
+			"stateVersion = %d, want %d",
+			update.GetStateVersion(),
+			initialVersion+1,
+		)
+	}
+
+	if g.applied.Load() != 1 {
+		t.Fatalf("applied %d actions, want 1", g.applied.Load())
+	}
+}
+
+func TestStaleStateRejected(t *testing.T) {
+	g := &validationTestGame{}
+	s, ctx := startSession(t, g)
+	sender := newFakeSender()
+
+	// Join and start the match.
+	if err := s.Join(ctx, "a", "Alice", 1, sender); err != nil {
+		t.Fatal(err)
+	}
+	sender.next(t)
+
+	s.SetReady(ctx, "a", true, 2)
+	started := sender.next(t).GetStateUpdate()
+	if started == nil {
+		t.Fatal("expected match to start")
+	}
+
+	version := started.GetStateVersion()
+	if version < 2 {
+		t.Fatalf("unexpected initial version: %d", version)
+	}
+
+	// Submit a legal action using an outdated state version.
+	s.Submit(ctx, game.Action{
+		ID:      2,
+		ActorID: "a",
+		Payload: []byte("legal"),
+	}, s.ID, version-1, sender)
+
+	rejected := sender.next(t)
+	resp := rejected.GetErrorResponse()
+
+	if resp == nil ||
+		resp.GetCode() != transport.CodeStaleState {
+		t.Fatalf("expected STALE_STATE, got %v", rejected)
+	}
+
+	if rejected.GetInReplyTo() != 2 {
+		t.Fatalf("incorrect response sequence: %v", rejected)
+	}
+
+	if g.applied.Load() != 0 {
+		t.Fatal("stale action was applied")
+	}
+
+	// Retry with the correct version.
+	s.Submit(ctx, game.Action{
+		ID:      3,
+		ActorID: "a",
+		Payload: []byte("legal"),
+	}, s.ID, version, sender)
+
+	accepted := sender.next(t)
+	update := accepted.GetStateUpdate()
+
+	if update == nil {
+		t.Fatalf("expected StateUpdate, got %v", accepted)
+	}
+
+	if update.GetStateVersion() != version+1 {
+		t.Fatalf(
+			"version = %d, want %d",
+			update.GetStateVersion(),
+			version+1,
+		)
+	}
+
+	if g.applied.Load() != 1 {
+		t.Fatalf(
+			"applied %d actions, want 1",
+			g.applied.Load(),
+		)
+	}
+}
+
 // The stub ends after four actions with its own result type, which the core must pass on through the
 // MatchResult interface rather than asserting a concrete type
 func TestMatchEndBroadcastsMatchResult(t *testing.T) {
@@ -206,19 +375,48 @@ func TestMatchEndBroadcastsMatchResult(t *testing.T) {
 	if err := s.Join(ctx, "b", "", 1, b); err != nil {
 		t.Fatal(err)
 	}
+
 	s.SetReady(ctx, "a", true, 2)
 	s.SetReady(ctx, "b", true, 2)
+
+	var stateVersion uint64
+
 	for _, f := range []*fakeSender{a, b} {
-		for f.next(t).GetStateUpdate().GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
+		for {
+			update := f.next(t).GetStateUpdate()
+			if update == nil {
+				t.Fatal("expected StateUpdate")
+			}
+			if update.GetStatus() == pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
+				stateVersion = update.GetStateVersion()
+				break
+			}
 		}
 	}
 
-	for i, actor := range []string{"a", "b", "a", "b"} { // the stub alternates turns in join order
-		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: actor, Payload: []byte("NoOp")})
+	senders := map[string]*fakeSender{
+		"a": a,
+		"b": b,
+	}
+
+	for i, actor := range []string{"a", "b", "a", "b"} {
+		seq := uint64(10 + i)
+
+		s.Submit(ctx, game.Action{
+			ID:      seq,
+			ActorID: actor,
+			Payload: []byte("NoOp"),
+		}, s.ID, stateVersion, senders[actor])
+
 		for _, f := range []*fakeSender{a, b} {
-			if got := f.next(t); got.GetStateUpdate() == nil {
-				t.Fatalf("action %d: expected a StateUpdate, got %v", i, got)
+			got := f.next(t)
+			update := got.GetStateUpdate()
+
+			if update == nil {
+				t.Fatalf("action %d: expected StateUpdate, got %v", i, got)
 			}
+
+			stateVersion = update.GetStateVersion()
 		}
 	}
 
