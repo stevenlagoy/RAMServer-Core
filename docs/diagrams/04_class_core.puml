@@ -1,0 +1,173 @@
+@startuml 04_class_core
+title Class Diagram: Server Core (connection, session, match, transport)
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam class<<planned>> {
+  BackgroundColor #EEEEEE
+  BorderColor #888888
+  FontColor #666666
+}
+hide empty members
+
+package "internal/server" {
+  class Serve <<function>> {
+    +Serve(ctx, listener, config, games) error
+  }
+  class ServerConfig {
+    +MaxConnections : int
+    +ReadTimeout : Duration
+    +FirstMessageTimeout : Duration
+    +WriteTimeout : Duration
+    +CloseTimeout : Duration
+    +PingInterval : Duration
+    +OutQueueSize : int
+    +MaxConnectionsOneIP : int32
+  }
+  class ipLimiter {
+    -counts : map[string]int32
+    +allow(addr, max) (release, ok)
+  }
+  class Client {
+    +ID : string
+    +DisplayName : string
+    -connection : net.Conn
+    -out : chan []byte
+    -connected : bool
+    -authenticated : bool
+    -session : *Session
+    +Run(ctx)
+    +Send(message []byte)
+    -readLoop(ctx)
+    -writeLoop(ctx)
+    -handshake(msg)
+    -dispatch(ctx, msg)
+    -handleJoinSession(ctx, msg)
+  }
+}
+
+package "internal/session" {
+  interface Sender {
+    +Send(message []byte)
+  }
+  class SessionStore {
+    -sessions : map[string]*Session
+    +Create(ctx, id, gameName, g, public) (*Session, error)
+    +Get(id) (*Session, bool)
+    +List(gameName, publicOnly) []*Session
+    +Remove(id)
+  }
+  class Session <<actor>> {
+    +ID : string
+    +GameName : string
+    +Public : bool
+    -inbox : chan sessionMsg
+    -order : []string
+    -members : map[string]*Member
+    -history : []RoundRecord
+    -current : *Match
+    +Run(ctx)
+    +Join(ctx, clientID, displayName, seq, sender) error
+    +Leave(ctx, clientID)
+    +SetReady(ctx, clientID, ready)
+    +Submit(ctx, action)
+    +LegalMoves(ctx, clientID) []ActionSpec
+    +Owner() string
+  }
+  class Member {
+    +ClientID : string
+    +DisplayName : string
+    +Role : game.Role
+    +Ready : bool
+  }
+  class RoundRecord <<session.MatchResult>> {
+    +Turns : int
+    +Result : game.MatchResult
+  }
+}
+
+package "internal/match" {
+  class Match {
+    +RosterOrder : []string
+    +Roles : map[string]game.Role
+    +State : game.GameState
+    +Turns : int
+    +ApplyAction(action) error
+    +Outcome() (MatchResult, bool)
+    +ViewFor(memberID) []byte
+    +LegalActions(memberID) []ActionSpec
+  }
+  class ErrNotYourTurn <<error>>
+}
+
+package "internal/transport" {
+  class ClientMessage {
+    +Kind : ClientMessageKind
+    +Sequence : uint64
+    +ProtocolVersion, ClientName : string
+    +DisplayName, PlayerID, ReconnectToken : string
+    +GameID, SessionID : string
+    +Action : game.Action
+    +ExpectedStateVersion : uint64
+  }
+  enum ClientMessageKind {
+    KindConnect
+    KindAuth
+    KindJoinSession
+    KindLeaveSession
+    KindAction
+  }
+  class ProtocolError {
+    +Code : ErrorCode
+    +Message : string
+    +SessionID : string
+    +Unwrap() error
+  }
+  class Codec <<functions>> {
+    +DecodeClientMessage(frame) (ClientMessage, error)
+    +EncodeConnectResponse(...) []byte
+    +EncodeAuthResponse(...) []byte
+    +EncodeStateUpdate(inReplyTo, StateUpdate) []byte
+    +EncodeMatchResult(MatchResult) []byte
+    +EncodeLeaveSessionResponse(...) []byte
+    +EncodeError(inReplyTo, err) []byte
+    +CompatibleVersion(v) bool
+  }
+  class Framing <<functions>> {
+    +ReadFrame(r) ([]byte, error)
+    +WriteFrame(w, payload) error
+    +MaxFrame = 64 KiB
+  }
+}
+
+package "internal/store (planned)" {
+  class MatchStore <<planned>> {
+    +SaveMatch(record) error
+    +LoadMatch(id) (record, error)
+  }
+}
+
+class "game.Game" as Game <<interface>>
+
+Serve ..> ipLimiter : uses
+Serve ..> Client : creates
+Serve ..> ServerConfig
+Client --> ServerConfig
+Client ..|> Sender
+Client "1" --> "0..1" Session : bound session
+Client ..> SessionStore
+Client ..> ClientMessage : decodes
+Client ..> Codec
+Client ..> Framing
+SessionStore "1" o-- "*" Session
+Session "1" o-- "*" Member
+Session "1" --> "0..1" Match : current
+Session "1" *-- "*" RoundRecord : history
+Member --> Sender
+Session ..> Codec : encodes broadcasts
+Session --> Game
+Match --> Game
+Match ..> ErrNotYourTurn
+ClientMessage --> ClientMessageKind
+Codec ..> ProtocolError
+Session ..> MatchStore : save on match end (planned)
+@enduml
