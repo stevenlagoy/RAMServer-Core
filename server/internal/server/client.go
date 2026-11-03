@@ -201,27 +201,44 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 	case transport.KindJoinSession:
 		c.handleJoinSession(ctx, msg)
 	case transport.KindLeaveSession:
-		if c.session == nil || c.session.ID != msg.SessionID {
-			c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
+		if !c.inSession(msg) {
 			return
 		}
 		c.session.Leave(ctx, c.ID)
 		c.session = nil
 		c.Send(transport.EncodeLeaveSessionResponse(msg.Sequence, msg.SessionID))
 	case transport.KindAction:
-		if c.session == nil || c.session.ID != msg.SessionID {
-			c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
+		if !c.inSession(msg) {
 			return
 		}
 		// TODO: enforce msg.ExpectedStateVersion once sessions track state_version
 		action := msg.Action
 		action.ActorID = c.ID // Don't trust IDs claimed by frame
 		c.session.Submit(ctx, action)
+	case transport.KindSetReady:
+		if !c.inSession(msg) {
+			return
+		}
+		c.session.SetReady(ctx, c.ID, msg.Ready, msg.Sequence) // the session replies
+	case transport.KindLegalActions:
+		if !c.inSession(msg) {
+			return
+		}
+		c.Send(transport.EncodeLegalActionsResponse(msg.Sequence, c.ID, c.session.LegalMoves(ctx, c.ID)))
 	case transport.KindConnect, transport.KindAuth:
 		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidState, "already authenticated")))
 	default:
 		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeMalformedMessage, "unknown message kind %v", msg.Kind)))
 	}
+}
+
+// Reports whether msg names the client's current session, replying ERROR_CODE_NOT_IN_SESSION if it does not
+func (c *Client) inSession(msg transport.ClientMessage) bool {
+	if c.session == nil || c.session.ID != msg.SessionID {
+		c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
+		return false
+	}
+	return true
 }
 
 func (c *Client) handleJoinSession(ctx context.Context, msg transport.ClientMessage) {
@@ -233,9 +250,22 @@ func (c *Client) handleJoinSession(ctx context.Context, msg transport.ClientMess
 		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidArgument, "game_id is required")))
 		return
 	}
-	// Create a new session
+	// No session_id: join an open session, or create one
 	if msg.SessionID == "" {
-		// TODO: let the game's policy select an existing session before creating one
+		// Join an existing open session if available
+		for _, s := range c.sessions.List(msg.GameID, true) {
+			err := s.Join(ctx, c.ID, c.DisplayName, msg.Sequence, c)
+			if err == nil {
+				c.session = s
+				return
+			}
+			if !errors.Is(err, session.ErrLobbyFull) && !errors.Is(err, session.ErrAlreadyStarted) {
+				c.Send(transport.EncodeError(msg.Sequence, err)) // e.g. ctx cancelled: don't create a session
+				return
+			}
+		}
+
+		// No open sessions, make a new one
 		g, err := c.games.New(msg.GameID)
 		if err != nil {
 			c.Send(transport.EncodeError(msg.Sequence, transport.WrapError(transport.CodeUnknownGame, err)))
