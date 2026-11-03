@@ -12,6 +12,8 @@ import (
 	"net"
 	"os"
 	"runtime/debug"
+	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -208,6 +210,13 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 		c.session.Leave(ctx, c.ID)
 		c.session = nil
 		c.Send(transport.EncodeLeaveSessionResponse(msg.Sequence, msg.SessionID))
+	case transport.KindListSessions:
+		c.handleListSessions(ctx, msg)
+	case transport.KindMatchHistory:
+		if !c.inSession(msg) {
+			return
+		}
+		c.Send(transport.EncodeMatchHistoryResponse(msg.Sequence, msg.SessionID, c.session.History(ctx)))
 	case transport.KindAction:
 		if c.session == nil || c.session.ID != msg.SessionID {
 			c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
@@ -224,6 +233,15 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 	}
 }
 
+// Reports whether msg names the client's current session, replying ERROR_CODE_NOT_IN_SESSION if it does not
+func (c *Client) inSession(msg transport.ClientMessage) bool {
+	if c.session == nil || c.session.ID != msg.SessionID {
+		c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
+		return false
+	}
+	return true
+}
+
 func (c *Client) handleJoinSession(ctx context.Context, msg transport.ClientMessage) {
 	if c.session != nil {
 		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeAlreadyInSession, "already in session %q", c.session.ID)))
@@ -233,26 +251,31 @@ func (c *Client) handleJoinSession(ctx context.Context, msg transport.ClientMess
 		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidArgument, "game_id is required")))
 		return
 	}
-	// Create a new session
+	if (msg.CreateNew && msg.SessionID != "") || (msg.PrivateSession && !msg.CreateNew) {
+		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidArgument,
+			"create_new cannot be combined with session_id, and private_session requires create_new")))
+		return
+	}
+	if msg.CreateNew {
+		c.createAndJoin(ctx, msg)
+		return
+	}
+	// No session_id: join an open session, or create one
 	if msg.SessionID == "" {
-		// TODO: let the game's policy select an existing session before creating one
-		g, err := c.games.New(msg.GameID)
-		if err != nil {
-			c.Send(transport.EncodeError(msg.Sequence, transport.WrapError(transport.CodeUnknownGame, err)))
-			return
+		// Join an existing open session if available
+		for _, s := range c.sessions.List(msg.GameID, true) {
+			err := s.Join(ctx, c.ID, c.DisplayName, msg.Sequence, c)
+			if err == nil {
+				c.session = s
+				return
+			}
+			if !errors.Is(err, session.ErrLobbyFull) && !errors.Is(err, session.ErrAlreadyStarted) {
+				c.Send(transport.EncodeError(msg.Sequence, err)) // e.g. ctx cancelled: don't create a session
+				return
+			}
 		}
-		s, err := c.sessions.Create(ctx, newSessionID(), msg.GameID, g, true)
-		if err != nil {
-			c.Send(transport.EncodeError(msg.Sequence, err))
-			return
-		}
-		// Joining like any other member replies with the creator's StateUpdate
-		if err := s.Join(ctx, c.ID, c.DisplayName, msg.Sequence, c); err != nil {
-			c.sessions.Remove(s.ID) // never had a member
-			c.Send(transport.EncodeError(msg.Sequence, err))
-			return
-		}
-		c.session = s
+		// No open sessions, make a new one
+		c.createAndJoin(ctx, msg)
 		return
 	}
 	// Join an existing session
@@ -266,6 +289,43 @@ func (c *Client) handleJoinSession(ctx context.Context, msg transport.ClientMess
 		return
 	}
 	c.session = s
+}
+
+// Creates a session for msg.GameID and joins as the first member. Sessions are public by default
+func (c *Client) createAndJoin(ctx context.Context, msg transport.ClientMessage) {
+	g, err := c.games.New(msg.GameID)
+	if err != nil {
+		c.Send(transport.EncodeError(msg.Sequence, transport.WrapError(transport.CodeUnknownGame, err)))
+		return
+	}
+	s, err := c.sessions.Create(ctx, newSessionID(), msg.GameID, g, !msg.PrivateSession)
+	if err != nil {
+		c.Send(transport.EncodeError(msg.Sequence, err))
+		return
+	}
+	// Joining like any other member replies with creator's StateUpdate
+	if err := s.Join(ctx, c.ID, c.DisplayName, msg.Sequence, c); err != nil {
+		c.sessions.Remove(s.ID) // never had a member
+		c.Send(transport.EncodeError(msg.Sequence, err))
+		return
+	}
+	c.session = s
+}
+
+// Replies with public sessions which have a member. If a msg.GameID is given, only sessions for that game
+func (c *Client) handleListSessions(ctx context.Context, msg transport.ClientMessage) {
+	infos := []transport.SessionInfo{}
+	for _, s := range c.sessions.List(msg.GameID, true) {
+		info, ok := s.Info(ctx)
+		if !ok {
+			return // ctx was cancelled
+		}
+		if len(info.Players) > 0 {
+			infos = append(infos, info)
+		}
+	}
+	slices.SortFunc(infos, func(a, b transport.SessionInfo) int { return strings.Compare(a.SessionID, b.SessionID) })
+	c.Send(transport.EncodeListSessionsResponse(msg.Sequence, infos))
 }
 
 func newSessionID() string {

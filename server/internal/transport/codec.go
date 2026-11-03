@@ -3,9 +3,10 @@ package transport
 import (
 	"errors"
 	"fmt"
-	"github.com/stevenlagoy/ramserver-core/server/game"
 	"log"
 	"strings"
+
+	"github.com/stevenlagoy/ramserver-core/server/game"
 
 	"google.golang.org/protobuf/proto"
 
@@ -13,7 +14,7 @@ import (
 )
 
 // Schema version this server implements, as "<major>.<minor>"
-const ProtocolVersion = "1.0"
+const ProtocolVersion = "1.2"
 
 // Reports whether a client built against clientVersion may connect
 func CompatibleVersion(clientVersion string) bool {
@@ -81,6 +82,10 @@ const (
 	KindJoinSession
 	KindLeaveSession
 	KindAction
+	KindSetReady
+	KindLegalActions
+	KindListSessions
+	KindMatchHistory
 )
 
 func (k ClientMessageKind) String() string {
@@ -95,6 +100,14 @@ func (k ClientMessageKind) String() string {
 		return "LeaveSessionRequest"
 	case KindAction:
 		return "ActionRequest"
+	case KindSetReady:
+		return "SetReadyRequest"
+	case KindLegalActions:
+		return "LegalActionsRequest"
+	case KindListSessions:
+		return "ListSessionsRequest"
+	case KindMatchHistory:
+		return "MatchHistoryRequest"
 	default:
 		return "Unknown"
 	}
@@ -114,9 +127,15 @@ type ClientMessage struct {
 	PlayerID       string
 	ReconnectToken string
 
-	// KindJoinSession (GameID, SessionID), KindLeaveSession and KindAction (SessionID)
-	GameID    string
-	SessionID string
+	// KindJoinSession (GameID, SessionID, CreateNew, PrivateSession); KindListSessions (GameID, an optional filter);
+	// KindLeaveSession, KindAction, KindSetReady, KindLegalActions and KindMatchHistory (SessionID)	GameID    string
+	GameID         string
+	SessionID      string
+	CreateNew      bool
+	PrivateSession bool
+
+	// KindSetReady
+	Ready bool
 
 	// KindAction. Action.ID is Sequence; ActorID is left for the caller to set
 	Action               game.Action
@@ -144,6 +163,8 @@ func DecodeClientMessage(frame []byte) (ClientMessage, error) {
 		msg.Kind = KindJoinSession
 		msg.GameID = p.JoinSessionRequest.GetGameId()
 		msg.SessionID = p.JoinSessionRequest.GetSessionId()
+		msg.CreateNew = p.JoinSessionRequest.GetCreateNew()
+		msg.PrivateSession = p.JoinSessionRequest.GetPrivateSession()
 	case *pb.ClientMessage_LeaveSessionRequest:
 		msg.Kind = KindLeaveSession
 		msg.SessionID = p.LeaveSessionRequest.GetSessionId()
@@ -152,6 +173,19 @@ func DecodeClientMessage(frame []byte) (ClientMessage, error) {
 		msg.SessionID = p.ActionRequest.GetSessionId()
 		msg.ExpectedStateVersion = p.ActionRequest.GetExpectedStateVersion()
 		msg.Action = game.Action{ID: msg.Sequence, Payload: p.ActionRequest.GetEncodedAction()}
+	case *pb.ClientMessage_SetReadyRequest:
+		msg.Kind = KindSetReady
+		msg.SessionID = p.SetReadyRequest.GetSessionId()
+		msg.Ready = p.SetReadyRequest.GetReady()
+	case *pb.ClientMessage_LegalActionsRequest:
+		msg.Kind = KindLegalActions
+		msg.SessionID = p.LegalActionsRequest.GetSessionId()
+	case *pb.ClientMessage_ListSessionsRequest:
+		msg.Kind = KindListSessions
+		msg.GameID = p.ListSessionsRequest.GetGameId()
+	case *pb.ClientMessage_MatchHistoryRequest:
+		msg.Kind = KindMatchHistory
+		msg.SessionID = p.MatchHistoryRequest.GetSessionId()
 	default:
 		return msg, NewError(CodeMalformedMessage, "client message has no known payload")
 	}
@@ -189,26 +223,41 @@ type StateUpdate struct {
 	EncodedView    []byte
 	ActivePlayerID string
 	PlayerOrder    []string
+	OwnerPlayerID  string
+	Annotations    map[string]string
 }
 
 type SessionPlayer struct {
 	PlayerID    string
 	DisplayName string
 	Connected   bool
+	Ready       bool
+	Role        string
 }
 
 type MatchResult struct {
-	SessionID       string
-	WinnerPlayerIDs []string
-	Draw            bool
-	Summaries       []PlayerActionSummary
-	Reason          MatchEndReason
+	SessionID         string
+	WinnerPlayerIDs   []string
+	Draw              bool
+	Summaries         []PlayerActionSummary
+	Reason            MatchEndReason
+	TerminationReason string // Game-defined, like "CHECKMATE", may be empty
+	Turns             uint32
 }
 
 type PlayerActionSummary struct {
 	PlayerID        string
 	ActionsAccepted int32
 	ActionsRejected int32
+}
+
+type SessionInfo struct {
+	SessionID     string
+	GameID        string
+	Status        SessionStatus
+	Players       []SessionPlayer
+	OwnerPlayerID string
+	Joinable      bool
 }
 
 // Reply to a successful ConnectRequest
@@ -244,29 +293,55 @@ func EncodeLeaveSessionResponse(inReplyTo uint64, sessionID string) []byte {
 	})
 }
 
+// Reply to a LegalActionsRequest: the actions playerID may take right now. Send only to that player
+func EncodeLegalActionsResponse(inReplyTo uint64, playerID string, actions []game.ActionSpec) []byte {
+	specs := make([]*pb.LegalActionSpec, len(actions))
+	for i, a := range actions {
+		specs[i] = &pb.LegalActionSpec{Payload: a.Payload, Description: a.Description}
+	}
+	return marshal(&pb.ServerMessage{
+		InReplyTo: inReplyTo,
+		Payload: &pb.ServerMessage_LegalActionsResponse{LegalActionsResponse: &pb.LegalActionsResponse{
+			PlayerId:     playerID,
+			LegalActions: specs,
+		}},
+	})
+}
+
+func playersToPB(players []SessionPlayer) []*pb.SessionPlayer {
+	out := make([]*pb.SessionPlayer, len(players))
+	for i, p := range players {
+		out[i] = &pb.SessionPlayer{
+			PlayerId:    p.PlayerID,
+			DisplayName: p.DisplayName,
+			Connected:   p.Connected,
+			Ready:       p.Ready,
+			Role:        p.Role,
+		}
+	}
+	return out
+}
+
 // One recipient's copy of a session broadcast
 func EncodeStateUpdate(inReplyTo uint64, s StateUpdate) []byte {
-	players := make([]*pb.SessionPlayer, len(s.Players))
-	for i, p := range s.Players {
-		players[i] = &pb.SessionPlayer{PlayerId: p.PlayerID, DisplayName: p.DisplayName, Connected: p.Connected}
-	}
 	return marshal(&pb.ServerMessage{
 		InReplyTo: inReplyTo,
 		Payload: &pb.ServerMessage_StateUpdate{StateUpdate: &pb.StateUpdate{
 			SessionId:      s.SessionID,
 			GameId:         s.GameID,
 			Status:         s.Status,
-			Players:        players,
+			Players:        playersToPB(s.Players),
 			StateVersion:   s.StateVersion,
 			EncodedView:    s.EncodedView,
 			ActivePlayerId: s.ActivePlayerID,
 			PlayerOrder:    s.PlayerOrder,
+			OwnerPlayerId:  s.OwnerPlayerID,
+			Annotations:    s.Annotations,
 		}},
 	})
 }
 
-// Match-conclusion broadcast; always unsolicited, so in_reply_to is 0
-func EncodeMatchResult(m MatchResult) []byte {
+func matchResultToPB(m MatchResult) *pb.MatchResult {
 	summaries := make([]*pb.PlayerActionSummary, len(m.Summaries))
 	for i, s := range m.Summaries {
 		summaries[i] = &pb.PlayerActionSummary{
@@ -275,13 +350,54 @@ func EncodeMatchResult(m MatchResult) []byte {
 			ActionsRejected: s.ActionsRejected,
 		}
 	}
+	return &pb.MatchResult{
+		SessionId:         m.SessionID,
+		WinnerPlayerIds:   m.WinnerPlayerIDs,
+		Draw:              m.Draw,
+		Summaries:         summaries,
+		Reason:            m.Reason,
+		TerminationReason: m.TerminationReason,
+		Turns:             m.Turns,
+	}
+}
+
+// Match-conclusion broadcast; always unsolicited, so in_reply_to is 0
+func EncodeMatchResult(m MatchResult) []byte {
 	return marshal(&pb.ServerMessage{
-		Payload: &pb.ServerMessage_MatchResult{MatchResult: &pb.MatchResult{
-			SessionId:       m.SessionID,
-			WinnerPlayerIds: m.WinnerPlayerIDs,
-			Draw:            m.Draw,
-			Summaries:       summaries,
-			Reason:          m.Reason,
+		Payload: &pb.ServerMessage_MatchResult{MatchResult: matchResultToPB(m)},
+	})
+}
+
+func EncodeListSessionsResponse(inReplyTo uint64, sessions []SessionInfo) []byte {
+	infos := make([]*pb.SessionInfo, len(sessions))
+	for i, s := range sessions {
+		infos[i] = &pb.SessionInfo{
+			SessionId:     s.SessionID,
+			GameId:        s.GameID,
+			Status:        s.Status,
+			Players:       playersToPB(s.Players),
+			OwnerPlayerId: s.OwnerPlayerID,
+			Joinable:      s.Joinable,
+		}
+	}
+	return marshal(&pb.ServerMessage{
+		InReplyTo: inReplyTo,
+		Payload: &pb.ServerMessage_ListSessionsResponse{ListSessionsResponse: &pb.ListSessionsResponse{
+			Sessions: infos,
+		}},
+	})
+}
+
+func EncodeMatchHistoryResponse(inReplyTo uint64, sessionID string, matches []MatchResult) []byte {
+	results := make([]*pb.MatchResult, len(matches))
+	for i, m := range matches {
+		results[i] = matchResultToPB(m)
+	}
+	return marshal(&pb.ServerMessage{
+		InReplyTo: inReplyTo,
+		Payload: &pb.ServerMessage_MatchHistoryResponse{MatchHistoryResponse: &pb.MatchHistoryResponse{
+			SessionId: sessionID,
+			Matches:   results,
 		}},
 	})
 }
