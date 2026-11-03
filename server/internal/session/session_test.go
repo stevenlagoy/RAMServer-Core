@@ -3,16 +3,16 @@ package session
 import (
 	"context"
 	"errors"
-	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"testing"
 	"time"
+
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
-	"github.com/stevenlagoy/ramserver-core/server/rulesets/chess"
 )
 
 // fakeSender records every frame a Session sends to one member
@@ -80,8 +80,8 @@ func TestSessionPipeline_JoinReadyLeave(t *testing.T) {
 	_ = ownerSender.next(t)
 
 	// Ready State Check
-	sess.SetReady(ctx, "owner-1", true)
-	sess.SetReady(ctx, "client-2", true)
+	sess.SetReady(ctx, "owner-1", true, 3)
+	sess.SetReady(ctx, "client-2", true, 3)
 
 	_ = ownerSender.next(t)
 	_ = clientSender.next(t)
@@ -159,7 +159,7 @@ func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 		t.Fatalf("err = %v, want ErrLobbyFull", err)
 	}
 
-	s.SetReady(ctx, "a", true) // starts the match; turn order is copied from s.order
+	s.SetReady(ctx, "a", true, 2) // starts the match; turn order is copied from s.order
 	state := a.next(t).GetStateUpdate()
 	if state.GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
 		t.Fatalf("expected match to start, got %v", state)
@@ -169,8 +169,7 @@ func TestRejectedJoinDoesNotEnterTurnOrder(t *testing.T) {
 	}
 }
 
-// Joins refused by the session reach clients as ERROR_CODE_SESSION_NOT_JOINABLE. Tested here
-// because a match cannot yet be started over the protocol.
+// Joins refused by the session reach clients as ERROR_CODE_SESSION_NOT_JOINABLE
 func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
 	s, ctx := startSession(t, &StubGame.StubGame{})
 	a := newFakeSender()
@@ -178,7 +177,7 @@ func TestJoinAfterMatchStartsIsNotJoinable(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.next(t)
-	s.SetReady(ctx, "a", true)
+	s.SetReady(ctx, "a", true, 2)
 	if state := a.next(t).GetStateUpdate(); state.GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
 		t.Fatalf("expected match to start, got %v", state)
 	}
@@ -197,46 +196,66 @@ func TestFullLobbyIsNotJoinable(t *testing.T) {
 	}
 }
 
-// Tests that a MatchResult is received in a real game implementation.
-func TestChessCheckmateEndsTheMatch(t *testing.T) {
-	s, ctx := startSession(t, &chess.Game{})
-	white, black := newFakeSender(), newFakeSender()
-	if err := s.Join(ctx, "white", "", 1, white); err != nil { // first to join plays white
+// The stub ends after four actions with its own result type, which the core must pass on through the
+// MatchResult interface rather than asserting a concrete type
+func TestMatchEndBroadcastsMatchResult(t *testing.T) {
+	s, ctx := startSession(t, &StubGame.StubGame{})
+	a, b := newFakeSender(), newFakeSender()
+	if err := s.Join(ctx, "a", "", 1, a); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Join(ctx, "black", "", 1, black); err != nil {
+	if err := s.Join(ctx, "b", "", 1, b); err != nil {
 		t.Fatal(err)
 	}
-	s.SetReady(ctx, "white", true)
-	s.SetReady(ctx, "black", true)
-	for _, f := range []*fakeSender{white, black} {
+	s.SetReady(ctx, "a", true, 2)
+	s.SetReady(ctx, "b", true, 2)
+	for _, f := range []*fakeSender{a, b} {
 		for f.next(t).GetStateUpdate().GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
 		}
 	}
 
-	// Fool's mate: 1. f3 e5 2. g4 Qh4#
-	moves := []struct{ actor, uci string }{
-		{"white", "f2f3"}, {"black", "e7e5"}, {"white", "g2g4"}, {"black", "d8h4"},
-	}
-	for i, m := range moves {
-		seq := uint64(10 + i)
-		s.Submit(ctx, game.Action{ID: seq, ActorID: m.actor, Payload: []byte(m.uci)})
-		for _, f := range []*fakeSender{white, black} {
+	for i, actor := range []string{"a", "b", "a", "b"} { // the stub alternates turns in join order
+		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: actor, Payload: []byte("NoOp")})
+		for _, f := range []*fakeSender{a, b} {
 			if got := f.next(t); got.GetStateUpdate() == nil {
-				t.Fatalf("move %s: expected a StateUpdate, got %v", m.uci, got)
+				t.Fatalf("action %d: expected a StateUpdate, got %v", i, got)
 			}
 		}
 	}
 
-	for name, f := range map[string]*fakeSender{"white": white, "black": black} {
+	for name, f := range map[string]*fakeSender{"a": a, "b": b} {
 		got := f.next(t)
 		result := got.GetMatchResult()
 		if result == nil || got.GetInReplyTo() != 0 {
-			t.Fatalf("%s: expected an unsolicited MatchResult after checkmate, got %v", name, got)
+			t.Fatalf("%s: expected an unsolicited MatchResult, got %v", name, got)
 		}
-		if result.GetDraw() || len(result.GetWinnerPlayerIds()) != 1 || result.GetWinnerPlayerIds()[0] != "black" {
-			t.Fatalf("%s: expected black to win, got %v", name, result)
+		if !result.GetDraw() || len(result.GetWinnerPlayerIds()) != 0 {
+			t.Fatalf("%s: expected a draw, got %v", name, result)
 		}
+	}
+}
+
+func TestLeaveOfLastUnreadyMemberStartsMatch(t *testing.T) {
+	s, ctx := startSession(t, &StubGame.StubGame{}) // the stub can start with one ready player
+	a := newFakeSender()
+	if err := s.Join(ctx, "a", "", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Join(ctx, "b", "", 1, newFakeSender()); err != nil {
+		t.Fatal(err)
+	}
+	s.SetReady(ctx, "a", true, 2)
+	s.Leave(ctx, "b")
+
+	var got *pb.ServerMessage
+	for got.GetStateUpdate().GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS {
+		got = a.next(t) // fails if the match never starts
+	}
+	if got.GetInReplyTo() != 0 {
+		t.Fatalf("expected an unsolicited start, got %v", got)
+	}
+	if order := got.GetStateUpdate().GetPlayerOrder(); len(order) != 1 || order[0] != "a" {
+		t.Fatalf("player_order = %v, want [a]", order)
 	}
 }
 
@@ -258,7 +277,7 @@ func startMatch(t *testing.T, s *Session, ctx context.Context, ids ...string) (m
 		}
 	}
 	for _, id := range ids {
-		s.SetReady(ctx, id, true)
+		s.SetReady(ctx, id, true, 2)
 	}
 	started := make(map[string]*pb.StateUpdate, len(ids))
 	for id, f := range senders {
@@ -279,21 +298,136 @@ func TestEachMemberReceivesOnlyTheirOwnView(t *testing.T) {
 	}
 }
 
-func TestChessViewIsTheCurrentPosition(t *testing.T) {
-	const startFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-	s, ctx := startSession(t, &chess.Game{})
-	senders, started := startMatch(t, s, ctx, "white", "black") // first to join plays white
-	for id, state := range started {
-		if got := string(state.GetEncodedView()); got != startFEN {
-			t.Fatalf("%s's starting view = %q, want %q", id, got, startFEN)
+// spectatorGame has one player seat and unlimited spectators
+type spectatorGame struct{ StubGame.StubGame }
+
+func (g *spectatorGame) Roles() []game.RoleSpec {
+	return []game.RoleSpec{{Name: game.RolePlayer, Min: 1, Max: 1}, {Name: game.RoleSpectator}}
+}
+
+// reasonGame ends its match with a winner and a game-defined termination reason
+type reasonGame struct{ StubGame.StubGame }
+
+func (g *reasonGame) Outcome(state game.GameState) (game.MatchResult, bool) {
+	if _, done := g.StubGame.Outcome(state); !done {
+		return nil, false
+	}
+	return StubGame.Result{Result: game.Result{WinnerIDs: []string{"a"}, Reason: "TEST_REASON"}}, true
+}
+
+// annotatedGame attaches a per-member annotation to every view
+type annotatedGame struct{ StubGame.StubGame }
+
+func (g *annotatedGame) Annotations(_ game.GameState, memberID string) map[string]string {
+	return map[string]string{"who": memberID}
+}
+
+func TestStateUpdateReportsRolesReadinessAndOwner(t *testing.T) {
+	s, ctx := startSession(t, &spectatorGame{})
+	a, b := newFakeSender(), newFakeSender()
+	if err := s.Join(ctx, "a", "Alice", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	a.next(t)
+	if err := s.Join(ctx, "b", "Bob", 1, b); err != nil {
+		t.Fatal(err)
+	}
+	a.next(t)
+	b.next(t)
+	s.SetReady(ctx, "a", true, 2) // b is not ready, so the match does not start
+
+	state := b.next(t).GetStateUpdate()
+	if state.GetStatus() != pb.SessionStatus_SESSION_STATUS_WAITING || state.GetOwnerPlayerId() != "a" {
+		t.Fatalf("expected a waiting session owned by a, got %v", state)
+	}
+	players := state.GetPlayers()
+	if len(players) != 2 {
+		t.Fatalf("expected 2 players, got %v", players)
+	}
+	if p := players[0]; p.GetPlayerId() != "a" || p.GetRole() != "player" || !p.GetReady() {
+		t.Errorf("first member = %v, want a, role player, ready", p)
+	}
+	if p := players[1]; p.GetPlayerId() != "b" || p.GetRole() != "spectator" || p.GetReady() {
+		t.Errorf("second member = %v, want b, role spectator, not ready", p)
+	}
+}
+
+func TestInfoDescribesTheSession(t *testing.T) {
+	s, ctx := startSession(t, &StubGame.StubGame{})
+	a := newFakeSender()
+	if err := s.Join(ctx, "a", "Alice", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	a.next(t)
+
+	info, ok := s.Info(ctx)
+	if !ok || info.SessionID != "s1" || info.GameID != "test" || info.Status != transport.StatusWaiting ||
+		!info.Joinable || info.OwnerPlayerID != "a" || len(info.Players) != 1 || info.Players[0].Role != "player" {
+		t.Fatalf("unexpected info for a waiting session: %+v (ok=%v)", info, ok)
+	}
+
+	s.SetReady(ctx, "a", true, 2) // the stub starts with one ready player
+	a.next(t)
+	if info, _ := s.Info(ctx); info.Status != transport.StatusInProgress || info.Joinable {
+		t.Fatalf("a running match must be in progress and not joinable, got %+v", info)
+	}
+}
+
+func TestFullSessionIsNotJoinableInInfo(t *testing.T) {
+	s, ctx := startSession(t, &oneSeatGame{})
+	a := newFakeSender()
+	if err := s.Join(ctx, "a", "", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := s.Info(ctx); info.Joinable {
+		t.Fatalf("a session with no free seat is joinable: %+v", info)
+	}
+}
+
+func TestMatchResultCarriesReasonAndTurnsAndIsKeptInHistory(t *testing.T) {
+	s, ctx := startSession(t, &reasonGame{})
+	senders, _ := startMatch(t, s, ctx, "a", "b")
+	a, b := senders["a"], senders["b"]
+	if history := s.History(ctx); len(history) != 0 {
+		t.Fatalf("history before any match ended = %v, want empty", history)
+	}
+
+	for i, actor := range []string{"a", "b", "a", "b"} { // the stub ends after four actions
+		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: actor, Payload: []byte("NoOp")})
+		a.next(t)
+		b.next(t)
+	}
+	for name, f := range map[string]*fakeSender{"a": a, "b": b} {
+		result := f.next(t).GetMatchResult()
+		winners := result.GetWinnerPlayerIds()
+		if result == nil || result.GetDraw() || len(winners) != 1 || winners[0] != "a" ||
+			result.GetTerminationReason() != "TEST_REASON" || result.GetTurns() != 4 {
+			t.Fatalf("%s: unexpected MatchResult %v", name, result)
 		}
 	}
 
-	s.Submit(ctx, game.Action{ID: 5, ActorID: "white", Payload: []byte("e2e4")})
-	const afterE4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
-	for _, f := range senders {
-		if got := string(f.next(t).GetStateUpdate().GetEncodedView()); got != afterE4 {
-			t.Fatalf("view after e2e4 = %q, want %q", got, afterE4)
-		}
+	history := s.History(ctx)
+	if len(history) != 1 {
+		t.Fatalf("expected one finished match in the history, got %v", history)
+	}
+	if h := history[0]; h.Draw || h.TerminationReason != "TEST_REASON" || h.Turns != 4 || h.SessionID != "s1" ||
+		len(h.WinnerPlayerIDs) != 1 || h.WinnerPlayerIDs[0] != "a" {
+		t.Fatalf("unexpected history entry %+v", h)
+	}
+}
+
+func TestStateUpdatesCarryGameAnnotations(t *testing.T) {
+	s, ctx := startSession(t, &annotatedGame{})
+	a := newFakeSender()
+	if err := s.Join(ctx, "a", "", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	if waiting := a.next(t).GetStateUpdate(); len(waiting.GetAnnotations()) != 0 {
+		t.Fatalf("a waiting session has annotations %v", waiting.GetAnnotations())
+	}
+	s.SetReady(ctx, "a", true, 2) // the stub starts with one ready player
+	started := a.next(t).GetStateUpdate()
+	if started.GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS || started.GetAnnotations()["who"] != "a" {
+		t.Fatalf("expected an in-progress update annotated for a, got %v", started)
 	}
 }
