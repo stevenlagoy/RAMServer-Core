@@ -158,7 +158,7 @@ message ListSessionsRequest {
   string game_id = 1;
 }
 
-message ListSessionsReponse {
+message ListSessionsResponse {
   repeated SessionInfo sessions = 1;
 }
 
