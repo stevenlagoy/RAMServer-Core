@@ -6,13 +6,19 @@ from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.json_format import MessageToJson
 from dataclasses import dataclass
 
+import websocket
+
 import gen.ramserver.v1.ramserver_pb2
 
 from piece import PlayerColor
 from move import Move
 
-HOST = "127.0.0.1"
-PORT = 9000
+# Local TCP
+# SERVER = "127.0.0.1:8080"
+
+# Hosted WebSocket
+SERVER = "wss://ramserver-core-80752473398.us-east5.run.app/connect"
+
 SILENT = False
 
 ClientMessage: Any = getattr(gen.ramserver.v1.ramserver_pb2, "ClientMessage")
@@ -23,14 +29,52 @@ player_id: str = ""
 session_id: str = ""
 own_color: PlayerColor | None = None  # known once the match starts
 
-def connect() -> socket.socket:
-    global sequence
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        sock.connect((HOST, PORT))
+class WebSocketSocket:
+    def __init__(self, ws):
+        self.ws = ws
+        self.buffer = bytearray()
 
-        # Start a persistent background thread to listen and print server responses
-        listener_thread = threading.Thread(target=listen_and_print_server_messages, args=(sock,), daemon=True)
+    def sendall(self, data: bytes) -> None:
+        self.ws.send(data, opcode=websocket.ABNF.OPCODE_BINARY)
+
+    def recv(self, n: int) -> bytes:
+        while not self.buffer:
+            message = self.ws.recv()
+            if message is None:
+                return b""
+            if isinstance(message, str):
+                raise ConnectionError("Received text instead of binary WebSocket data")
+            self.buffer.extend(message)
+        
+        result = bytes(self.buffer[:n])
+        del self.buffer[:n]
+        return result
+
+    def close(self) -> None:
+        self.ws.close()
+
+
+def connect() -> Any:
+    global sequence
+
+    try:
+        if SERVER.startswith(("ws://", "wss://")):
+            ws = websocket.create_connection(
+                SERVER,
+                enable_multithread=True,
+            )
+            sock = WebSocketSocket(ws)
+        else:
+            host, port = SERVER.rsplit(":", 1)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((host, int(port)))
+
+        # Start a persistent background thread to listen for server responses.
+        listener_thread = threading.Thread(
+            target=listen_and_print_server_messages,
+            args=(sock,),
+            daemon=True,
+        )
         listener_thread.start()
 
         client_msg = ClientMessage()
@@ -39,9 +83,17 @@ def connect() -> socket.socket:
         send_msg(sock, client_msg)
 
         return sock
-    except ConnectionRefusedError as e:
-        raise ConnectionRefusedError(f"Connection refused. Is the server listening on port {PORT}?") from e
 
+    except ConnectionRefusedError as e:
+        raise ConnectionRefusedError(
+            f"Connection refused. Is the server listening at {SERVER}?"
+        ) from e
+    except Exception as e:
+        raise ConnectionError(
+            f"Could not connect to {SERVER}: {e}"
+        ) from e
+
+    
 def authenticate(sock: socket.socket):
     client_msg = ClientMessage()
     client_msg.auth_request.display_name = "Python-Chess"
