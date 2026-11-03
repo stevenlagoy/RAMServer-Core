@@ -137,9 +137,6 @@ type ClientMessage struct {
 	// KindSetReady
 	Ready bool
 
-	// KindSetReady
-	Ready bool
-
 	// KindAction. Action.ID is Sequence; ActorID is left for the caller to set
 	Action               game.Action
 	ExpectedStateVersion uint64
