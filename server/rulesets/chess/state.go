@@ -116,6 +116,7 @@ type State struct {
 	moveHistory     []Move                                   // move history
 	activeDrawOffer bool                                     // Whether a draw offer is active from any player
 	drawAccepted    bool                                     // Whether a draw offer was accepted
+	resigned        string                                   // ID of the player who resigned, or "" if nobody has
 }
 
 func newState(whitePlayer string, blackPlayer string) State {
@@ -314,23 +315,42 @@ func (s State) pathClear(squares []Square) bool {
 	return true
 }
 
+// Whether one piece could capture on the target square if an opponent stood there. A piece never attacks its own square
+func (s State) pieceAttacks(piece *Piece, target Square) bool {
+	if piece.position.rank == target.rank && piece.position.file == target.file {
+		return false // Own square
+	}
+	for _, pattern := range piece.pieceType.movementPatterns {
+		if pattern.captures == moveOnly || pattern.unattacked != nil { // Pawn pushes and capturing never capture
+			continue
+		}
+		if pattern.evaluate(*piece.position, target, s) && s.pathClear(pattern.squaresInPath(*piece.position, target)) {
+			return true
+		}
+	}
+	return false
+}
+
 // Whether any piece of the given color could capture on the target square if an opponent stood there.
 // This does not generate legal movs, so it is safe to call while deciding legality
 func (s State) isAttacked(target Square, by Color) bool {
 	for _, piece := range s.pieces {
-		if piece.color != by {
-			continue
-		}
-		for _, pattern := range piece.pieceType.movementPatterns {
-			if pattern.captures == moveOnly || pattern.unattacked != nil { // Pawn pushes and capturing never capture
-				continue
-			}
-			if pattern.evaluate(*piece.position, target, s) && s.pathClear(pattern.squaresInPath(*piece.position, target)) {
-				return true
-			}
+		if piece.color == by && s.pieceAttacks(piece, target) {
+			return true
 		}
 	}
 	return false
+}
+
+// Every piece of the given color which attacks the target square
+func (s State) attackers(target Square, by Color) []*Piece {
+	var result []*Piece
+	for _, piece := range s.pieces {
+		if piece.color == by && s.pieceAttacks(piece, target) {
+			result = append(result, piece)
+		}
+	}
+	return result
 }
 
 // Whether any of the squares are attacked by the given color
@@ -530,6 +550,13 @@ func (s State) apply(m Move) State {
 	return next
 }
 
+// Returns the State after the player with the given ID resigns. Board and history is unchanced
+func (s State) resign(id string) State {
+	next := s.deepCopy()
+	next.resigned = id
+	return next
+}
+
 // Get the color a player controls
 func (s State) playerColor(id string) (Color, bool) {
 	switch id {
@@ -572,8 +599,14 @@ func (s State) drawResult(reason game.TerminationReason) (game.MatchResult, bool
 }
 
 // Check for win conditions. The expensive part, generating the moves of the player to move, is done exactly once
-// TODO: Check whether a player resigned.
 func (s State) outcome() (game.MatchResult, bool) {
+	// Resignation ends the match immediately
+	if s.resigned != "" {
+		color, _ := s.playerColor(s.resigned)
+		loser := s.resigned
+		return ChessResult{game.Result{WinnerIDs: []string{s.playerID(color.opponent())}, Reason: ReasonResignation}, &loser, s}, true
+	}
+
 	// A player with no legal moves has been checkmated, stalemated, or has no pieces remaining
 	// This has priority over automatic draws
 	if len(s.legalActionSpecs(s.activePlayer())) == 0 {

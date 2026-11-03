@@ -5,12 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"io"
 	"net"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
 	"google.golang.org/protobuf/proto"
@@ -571,6 +572,17 @@ func TestStubMatchOverProtocol(t *testing.T) {
 			t.Fatalf("%s: expected an unsolicited drawn MatchResult, got %v", name, resp)
 		}
 	}
+
+	expectState(t, alice, aliceR, 0, pb.SessionStatus_SESSION_STATUS_WAITING)
+	expectState(t, bob, bobR, 0, pb.SessionStatus_SESSION_STATUS_WAITING)
+
+	// The finished match is in the session's history
+	sendMessage(t, alice, matchHistoryRequest(30, sessionID))
+	history := expectMessage(t, alice, aliceR)
+	matches := history.GetMatchHistoryResponse().GetMatches()
+	if history.GetInReplyTo() != 30 || len(matches) != 1 || matches[0].GetTurns() != 4 || !matches[0].GetDraw() {
+		t.Fatalf("expected one drawn four-turn match in reply to 30, got %v", history)
+	}
 }
 
 func TestReadyAndLegalActionsRequireSession(t *testing.T) {
@@ -677,4 +689,164 @@ func TestJoinWithoutSessionIDSkipsFullSession(t *testing.T) {
 		t.Fatalf("expected Bob alone in the new session, got %v", players)
 	}
 	expectNoMessage(t, alice, aliceR)
+}
+
+func listSessionsRequest(seq uint64, gameID string) *pb.ClientMessage {
+	return &pb.ClientMessage{
+		Sequence: seq,
+		Payload:  &pb.ClientMessage_ListSessionsRequest{ListSessionsRequest: &pb.ListSessionsRequest{GameId: gameID}},
+	}
+}
+
+func matchHistoryRequest(seq uint64, sessionID string) *pb.ClientMessage {
+	return &pb.ClientMessage{
+		Sequence: seq,
+		Payload:  &pb.ClientMessage_MatchHistoryRequest{MatchHistoryRequest: &pb.MatchHistoryRequest{SessionId: sessionID}},
+	}
+}
+
+func createRequest(seq uint64, gameID string, private bool) *pb.ClientMessage {
+	return &pb.ClientMessage{
+		Sequence: seq,
+		Payload: &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{
+			GameId: gameID, CreateNew: true, PrivateSession: private,
+		}},
+	}
+}
+
+func TestListSessions(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, aliceID := authenticate(t, addr, "Alice")
+	bob, bobR, _ := authenticate(t, addr, "Bob")
+
+	sendMessage(t, bob, listSessionsRequest(3, ""))
+	resp := expectMessage(t, bob, bobR)
+	if resp.GetInReplyTo() != 3 || resp.GetListSessionsResponse() == nil || len(resp.GetListSessionsResponse().GetSessions()) != 0 {
+		t.Fatalf("expected an empty listing in reply to 3, got %v", resp)
+	}
+
+	sessionID := createSession(t, alice, aliceR, 3)
+	sendMessage(t, bob, listSessionsRequest(4, "stub"))
+	resp = expectMessage(t, bob, bobR)
+	sessions := resp.GetListSessionsResponse().GetSessions()
+	if resp.GetInReplyTo() != 4 || len(sessions) != 1 {
+		t.Fatalf("expected one session in reply to 4, got %v", resp)
+	}
+	info := sessions[0]
+	if info.GetSessionId() != sessionID || info.GetGameId() != "stub" || info.GetStatus() != pb.SessionStatus_SESSION_STATUS_WAITING ||
+		!info.GetJoinable() || info.GetOwnerPlayerId() != aliceID {
+		t.Fatalf("unexpected session info: %v", info)
+	}
+	if players := info.GetPlayers(); len(players) != 1 || players[0].GetPlayerId() != aliceID || players[0].GetRole() != "player" || players[0].GetReady() {
+		t.Fatalf("expected Alice as the only, unready player, got %v", players)
+	}
+
+	sendMessage(t, bob, listSessionsRequest(5, "stub-solo")) // the game filter excludes the stub session
+	resp = expectMessage(t, bob, bobR)
+	if resp.GetInReplyTo() != 5 || len(resp.GetListSessionsResponse().GetSessions()) != 0 {
+		t.Fatalf("expected no stub-solo sessions, got %v", resp)
+	}
+}
+
+func TestListAndHistoryRequireAuthentication(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	conn, r := connectOnly(t, addr)
+
+	sendMessage(t, conn, listSessionsRequest(2, ""))
+	expectError(t, conn, r, 2, pb.ErrorCode_ERROR_CODE_INVALID_STATE)
+	sendMessage(t, conn, matchHistoryRequest(3, "s1"))
+	expectError(t, conn, r, 3, pb.ErrorCode_ERROR_CODE_INVALID_STATE)
+}
+
+func TestCreateNewAlwaysMakesASession(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, _ := authenticate(t, addr, "Alice")
+	bob, bobR, bobID := authenticate(t, addr, "Bob")
+	aliceSession := createSession(t, alice, aliceR, 3) // open and joinable
+
+	sendMessage(t, bob, createRequest(3, "stub", false))
+	state := expectState(t, bob, bobR, 3, pb.SessionStatus_SESSION_STATUS_WAITING)
+	if state.GetSessionId() == aliceSession {
+		t.Fatalf("create_new joined the open session %q", aliceSession)
+	}
+	if players := state.GetPlayers(); len(players) != 1 || players[0].GetPlayerId() != bobID {
+		t.Fatalf("expected Bob alone in the new session, got %v", players)
+	}
+	expectNoMessage(t, alice, aliceR)
+}
+
+func TestCreateNewArgumentErrors(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	conn, r, _ := authenticate(t, addr, "Alice")
+
+	tests := []struct {
+		name string
+		msg  *pb.ClientMessage
+		code pb.ErrorCode
+	}{
+		{"create_new with a session_id", &pb.ClientMessage{Sequence: 3, Payload: &pb.ClientMessage_JoinSessionRequest{
+			JoinSessionRequest: &pb.JoinSessionRequest{GameId: "stub", SessionId: "s1", CreateNew: true}}}, pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT},
+		{"private_session without create_new", &pb.ClientMessage{Sequence: 4, Payload: &pb.ClientMessage_JoinSessionRequest{
+			JoinSessionRequest: &pb.JoinSessionRequest{GameId: "stub", PrivateSession: true}}}, pb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT},
+		{"create_new for an unknown game", createRequest(5, "nope", false), pb.ErrorCode_ERROR_CODE_UNKNOWN_GAME},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sendMessage(t, conn, tt.msg)
+			expectError(t, conn, r, tt.msg.GetSequence(), tt.code)
+		})
+	}
+}
+
+func TestPrivateSessionsAreNotListedOrAutoJoined(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, _ := authenticate(t, addr, "Alice")
+	bob, bobR, _ := authenticate(t, addr, "Bob")
+	carol, carolR, _ := authenticate(t, addr, "Carol")
+
+	sendMessage(t, alice, createRequest(3, "stub", true))
+	privateID := expectState(t, alice, aliceR, 3, pb.SessionStatus_SESSION_STATUS_WAITING).GetSessionId()
+
+	// Bob asks for any open session and is not put into Alice's private one
+	sendMessage(t, bob, joinRequest(3, "stub", ""))
+	bobSession := expectState(t, bob, bobR, 3, pb.SessionStatus_SESSION_STATUS_WAITING).GetSessionId()
+	if bobSession == privateID {
+		t.Fatalf("an open join was placed in the private session %q", privateID)
+	}
+
+	sendMessage(t, carol, listSessionsRequest(3, ""))
+	sessions := expectMessage(t, carol, carolR).GetListSessionsResponse().GetSessions()
+	if len(sessions) != 1 || sessions[0].GetSessionId() != bobSession {
+		t.Fatalf("expected only Bob's public session in the listing, got %v", sessions)
+	}
+
+	// The private session is still joinable by its ID
+	sendMessage(t, carol, joinRequest(4, "stub", privateID))
+	state := expectState(t, carol, carolR, 4, pb.SessionStatus_SESSION_STATUS_WAITING)
+	if state.GetSessionId() != privateID || len(state.GetPlayers()) != 2 {
+		t.Fatalf("expected Carol to join the private session, got %v", state)
+	}
+}
+
+func TestMatchHistoryRequiresMembershipAndStartsEmpty(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, _ := authenticate(t, addr, "Alice")
+	bob, bobR, _ := authenticate(t, addr, "Bob")
+	sessionID := createSession(t, alice, aliceR, 3)
+
+	sendMessage(t, alice, matchHistoryRequest(4, sessionID))
+	resp := expectMessage(t, alice, aliceR)
+	history := resp.GetMatchHistoryResponse()
+	if resp.GetInReplyTo() != 4 || history == nil || history.GetSessionId() != sessionID || len(history.GetMatches()) != 0 {
+		t.Fatalf("expected an empty history for %q in reply to 4, got %v", sessionID, resp)
+	}
+
+	sendMessage(t, bob, matchHistoryRequest(3, sessionID)) // Bob is not a member
+	expectError(t, bob, bobR, 3, pb.ErrorCode_ERROR_CODE_NOT_IN_SESSION)
 }

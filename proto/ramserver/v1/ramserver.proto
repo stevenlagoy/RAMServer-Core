@@ -20,6 +20,8 @@ message ClientMessage {
     ActionRequest action_request = 6;
     SetReadyRequest set_ready_request = 7;
     LegalActionsRequest legal_actions_request = 8;
+    ListSessionsRequest list_sessions_request = 9;
+    MatchHistoryRequest match_history_request = 10;
   }
 }
 
@@ -34,6 +36,8 @@ message ServerMessage {
     MatchResult match_result = 6;
     LeaveSessionResponse leave_session_response = 7;
     LegalActionsResponse legal_actions_response = 8;
+    ListSessionsResponse list_sessions_response = 9;
+    MatchHistoryResponse match_history_response = 10;
   }
 }
 
@@ -69,6 +73,8 @@ message AuthResponse {
 message JoinSessionRequest {
   string game_id = 1;
   string session_id = 2;
+  bool create_new = 3;
+  bool private_session = 4;
 }
 
 message LeaveSessionRequest {
@@ -124,12 +130,17 @@ message StateUpdate {
   bytes encoded_view = 6;
   string active_player_id = 7;
   repeated string player_order = 8;
+  string owner_player_id = 9;
+  // Game-defined key/value facts about state which don't require parsing encoded_view.
+  map<string, string> annotations = 10;
 }
 
 message SessionPlayer {
   string player_id = 1;
   string display_name = 2;
   bool connected = 3;
+  bool ready = 4;
+  string role = 5;
 }
 
 enum SessionStatus {
@@ -139,6 +150,34 @@ enum SessionStatus {
   SESSION_STATUS_STARTING = 3;
   SESSION_STATUS_IN_PROGRESS = 4;
   SESSION_STATUS_CLOSED = 5;
+}
+
+// --- Session discovery & history ---
+
+message ListSessionsRequest {
+  string game_id = 1;
+}
+
+message ListSessionsResponse {
+  repeated SessionInfo sessions = 1;
+}
+
+message SessionInfo {
+  string session_id = 1;
+  string game_id = 2;
+  SessionStatus status = 3;
+  repeated SessionPlayer players = 4;
+  string owner_player_id = 5;
+  bool joinable = 6;
+}
+
+message MatchHistoryRequest {
+  string session_id = 1;
+}
+
+message MatchHistoryResponse {
+  string session_id = 1;
+  repeated MatchResult matches = 2;
 }
 
 // --- Errors ---
@@ -175,6 +214,8 @@ message MatchResult {
   bool draw = 3;
   repeated PlayerActionSummary summaries = 4;
   MatchEndReason reason = 5;
+  string termination_reason = 6;
+  uint32 turns = 7;
 }
 
 enum MatchEndReason {
