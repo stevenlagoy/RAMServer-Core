@@ -203,8 +203,7 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 	case transport.KindJoinSession:
 		c.handleJoinSession(ctx, msg)
 	case transport.KindLeaveSession:
-		if c.session == nil || c.session.ID != msg.SessionID {
-			c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
+		if !c.inSession(msg) {
 			return
 		}
 		c.session.Leave(ctx, c.ID)
@@ -218,14 +217,23 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 		}
 		c.Send(transport.EncodeMatchHistoryResponse(msg.Sequence, msg.SessionID, c.session.History(ctx)))
 	case transport.KindAction:
-		if c.session == nil || c.session.ID != msg.SessionID {
-			c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
+		if !c.inSession(msg) {
 			return
 		}
 		// TODO: enforce msg.ExpectedStateVersion once sessions track state_version
 		action := msg.Action
 		action.ActorID = c.ID // Don't trust IDs claimed by frame
 		c.session.Submit(ctx, action)
+	case transport.KindSetReady:
+		if !c.inSession(msg) {
+			return
+		}
+		c.session.SetReady(ctx, c.ID, msg.Ready, msg.Sequence) // the session replies
+	case transport.KindLegalActions:
+		if !c.inSession(msg) {
+			return
+		}
+		c.Send(transport.EncodeLegalActionsResponse(msg.Sequence, c.ID, c.session.LegalMoves(ctx, c.ID)))
 	case transport.KindConnect, transport.KindAuth:
 		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidState, "already authenticated")))
 	default:
