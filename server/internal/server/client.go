@@ -277,7 +277,7 @@ func (c *Client) handleJoinSession(ctx context.Context, msg transport.ClientMess
 				c.session = s
 				return
 			}
-			if !errors.Is(err, session.ErrLobbyFull) && !errors.Is(err, session.ErrAlreadyStarted) {
+			if !errors.Is(err, session.ErrLobbyFull) && !errors.Is(err, session.ErrAlreadyStarted) && !errors.Is(err, session.ErrSessionClosed) {
 				c.Send(transport.EncodeError(msg.Sequence, err)) // e.g. ctx cancelled: don't create a session
 				return
 			}
@@ -306,7 +306,7 @@ func (c *Client) createAndJoin(ctx context.Context, msg transport.ClientMessage)
 		c.Send(transport.EncodeError(msg.Sequence, transport.WrapError(transport.CodeUnknownGame, err)))
 		return
 	}
-	s, err := c.sessions.Create(ctx, newSessionID(), msg.GameID, g, !msg.PrivateSession)
+	s, err := c.sessions.Create(newSessionID(), msg.GameID, g, !msg.PrivateSession)
 	if err != nil {
 		c.Send(transport.EncodeError(msg.Sequence, err))
 		return
