@@ -8,32 +8,36 @@ import (
 	"github.com/stevenlagoy/ramserver-core/server/game"
 )
 
-// Owns the lifetime of every active Session.
+// Owns the lifetime of every active Session. Each one runs under its own context derived from the
+// store's, never a connection's, so a Session outlives the player who created it.
 type SessionStore struct {
+	ctx      context.Context // the server's lifetime
 	mu       sync.Mutex
-	sessions map[string]*Session
+	sessions map[string]storedSession
 }
 
-func NewSessionStore() *SessionStore {
-	return &SessionStore{sessions: make(map[string]*Session)}
+type storedSession struct {
+	session *Session
+	cancel  context.CancelFunc // stops the Session's Run goroutine
 }
 
-// Starts a new, empty Session for g under gameName and runs it until ctx is
-// cancelled. The creator must Join it. Caller must ensure id is unique.
-func (st *SessionStore) Create(
-	ctx context.Context,
-	id,
-	gameName string,
-	g game.Game,
-	public bool,
-) (*Session, error) {
+// Creates a store whose Sessions all stop when ctx is cancelled
+func NewSessionStore(ctx context.Context) *SessionStore {
+	return &SessionStore{ctx: ctx, sessions: make(map[string]storedSession)}
+}
+
+// Starts a new, empty Session for g under gameName. It runs until its last member leaves, it is
+// removed, or the store's context is cancelled. The creator must Join it. Caller must ensure id is unique.
+func (st *SessionStore) Create(id, gameName string, g game.Game, public bool) (*Session, error) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if _, exists := st.sessions[id]; exists {
 		return nil, fmt.Errorf("session: id %q already in use", id)
 	}
+	ctx, cancel := context.WithCancel(st.ctx)
 	s := NewSession(id, gameName, g, public)
-	st.sessions[id] = s
+	s.onEmpty = func() { st.Remove(id) }
+	st.sessions[id] = storedSession{session: s, cancel: cancel}
 	go s.Run(ctx)
 	return s, nil
 }
@@ -42,17 +46,18 @@ func (st *SessionStore) Create(
 func (st *SessionStore) Get(id string) (*Session, bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	s, ok := st.sessions[id]
-	return s, ok
+	stored, ok := st.sessions[id]
+	return stored.session, ok
 }
 
 // Returns sessions for gameName (or all games if gameName is empty). When publicOnly
-// is true, private lobbies are exclided.
+// is true, private lobbies are excluded.
 func (st *SessionStore) List(gameName string, publicOnly bool) []*Session {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	var result []*Session
-	for _, s := range st.sessions {
+	for _, stored := range st.sessions {
+		s := stored.session
 		if gameName != "" && s.GameName != gameName {
 			continue
 		}
@@ -64,10 +69,13 @@ func (st *SessionStore) List(gameName string, publicOnly bool) []*Session {
 	return result
 }
 
-// Deletes id from the store
+// Deletes id from the store and stops its Session's Run goroutine
 func (st *SessionStore) Remove(id string) {
-	// TODO: Session's own Run goroutine is not stopped here. Empty lobbies should stop own Run loops, but this can't be done currently because they share ctx
 	st.mu.Lock()
-	defer st.mu.Unlock()
+	stored, ok := st.sessions[id]
 	delete(st.sessions, id)
+	st.mu.Unlock()
+	if ok {
+		stored.cancel()
+	}
 }
