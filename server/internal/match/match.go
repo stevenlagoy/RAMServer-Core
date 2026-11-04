@@ -32,8 +32,9 @@ var ErrNotYourTurn = errors.New("not your turn")
 
 // Checks turn legality and asks Game to validate and apply action. Updates
 // m.State and m.Turns when successful. Returns an error to the caller on failure.
+// A member who is not active is refused unless the Game allows the action out of turn.
 func (m *Match) ApplyAction(action game.Action) error {
-	if !isActive(m.Game.ActiveTurn(m.State), action.ActorID) {
+	if !isActive(m.Game.ActiveTurn(m.State), action.ActorID) && !m.allowedOutOfTurn(action) {
 		return ErrNotYourTurn
 	}
 	if err := m.Game.Validate(m.State, action); err != nil {
@@ -42,6 +43,12 @@ func (m *Match) ApplyAction(action game.Action) error {
 	m.State = m.Game.Apply(m.State, action)
 	m.Turns++
 	return nil
+}
+
+// Determine whether the Game allows an out-of-turn actor to submit this action
+func (m *Match) allowedOutOfTurn(action game.Action) bool {
+	g, ok := m.Game.(game.OutOfTurnActions)
+	return ok && g.AllowsOutOfTurn(m.State, action)
 }
 
 func isActive(activeIDs []string, id string) bool {
