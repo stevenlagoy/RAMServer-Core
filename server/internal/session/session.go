@@ -40,7 +40,9 @@ type Session struct {
 	Game     game.Game
 	Public   bool
 
-	inbox chan sessionMsg
+	inbox   chan sessionMsg
+	stopped chan struct{} // closed when Run returns, so callers stop waiting on a Session that will never answer
+	onEmpty func()        // set by SessionStore before Run starts; called when the last member leaves
 
 	// Below owned exclusively by Run goroutine
 
@@ -49,6 +51,7 @@ type Session struct {
 	history      []MatchResult
 	current      *match.Match
 	stateVersion uint64
+	emptied      bool // the last member left, so Run returns instead of handling more messages
 }
 
 // Creates an empty Session; its creator joins through Join like any other member
@@ -59,6 +62,7 @@ func NewSession(id, gameName string, g game.Game, public bool) *Session {
 		Game:         g,
 		Public:       public,
 		inbox:        make(chan sessionMsg),
+		stopped:      make(chan struct{}),
 		members:      make(map[string]*Member),
 		stateVersion: 1,
 	}
@@ -123,6 +127,8 @@ var (
 		transport.CodeSessionNotJoinable,
 		errors.New("match already in progress"),
 	)
+	// Returned by Join when the Session has stopped, such as after its last member left
+	ErrSessionClosed = transport.WrapError(transport.CodeSessionNotJoinable, errors.New("session has closed"))
 
 	ErrNotInSession = errors.New(
 		"player is not in the requested session",
@@ -133,39 +139,66 @@ var (
 	)
 )
 
-// Adds clientID to the lobby, blocking until Run processes the request or ctx is cancelled.
+// Hands msg to Run. Returns false if ctx is cancelled or the Session stops first
+func (s *Session) send(ctx context.Context, msg sessionMsg) bool {
+	select {
+	case s.inbox <- msg:
+		return true
+	case <-ctx.Done():
+	case <-s.stopped:
+	}
+	return false
+}
+
+// Waits for Run's reply to a request it accepted. Returns false if ctx is cancelled or the Session stops first
+func await[T any](ctx context.Context, s *Session, reply chan T) (T, bool) {
+	select {
+	case v := <-reply:
+		return v, true
+	case <-ctx.Done():
+	case <-s.stopped:
+		select {
+		case v := <-reply: // Run may have replied just before stopping
+			return v, true
+		default:
+		}
+	}
+	var zero T
+	return zero, false
+}
+
+// The error for a request that got no reply: ctx's error if it was cancelled, otherwise ErrSessionClosed
+func (s *Session) noReplyErr(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return ErrSessionClosed
+}
+
+// Adds clientID to the lobby, blocking until Run processes the request, ctx is cancelled, or the Session stops.
 // displayName is shown to other members in StateUpdate rosters; it is never used as identity.
 // seq is the JoinSessionRequest's sequence; the joiner's copy of the resulting StateUpdate replies to it.
 func (s *Session) Join(ctx context.Context, clientID, displayName string, seq uint64, sender Sender) error {
 	reply := make(chan error, 1)
-	select {
-	case s.inbox <- sessionMsg{join: &joinMsg{clientID: clientID, displayName: displayName, seq: seq, sender: sender, reply: reply}}:
-	case <-ctx.Done():
-		return ctx.Err()
+	if !s.send(ctx, sessionMsg{join: &joinMsg{clientID: clientID, displayName: displayName, seq: seq, sender: sender, reply: reply}}) {
+		return s.noReplyErr(ctx)
 	}
-	select {
-	case err := <-reply:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
+	err, ok := await(ctx, s, reply)
+	if !ok {
+		return s.noReplyErr(ctx)
 	}
+	return err
 }
 
-// Removes clientID from the lobby. Does not remove an empty Session; caller is reponsible for this
+// Removes clientID from the lobby. When the last member leaves, the Session removes itself from its store and stops
 func (s *Session) Leave(ctx context.Context, clientID string) {
-	select {
-	case s.inbox <- sessionMsg{leave: &leaveMsg{clientID: clientID}}:
-	case <-ctx.Done():
-	}
+	s.send(ctx, sessionMsg{leave: &leaveMsg{clientID: clientID}})
 }
 
 // Records whether clientID considers themself ready to start. seq is the SetReadyRequest's sequence:
 // the requester's copy of the resulting StateUpdate, or its ErrorResponse, replies to it.
 func (s *Session) SetReady(ctx context.Context, clientID string, ready bool, seq uint64) {
-	select {
-	case s.inbox <- sessionMsg{setReady: &setReadyMsg{clientID: clientID, ready: ready, seq: seq}}:
-	case <-ctx.Done():
-	}
+	s.send(ctx, sessionMsg{setReady: &setReadyMsg{clientID: clientID, ready: ready, seq: seq}})
 }
 
 // Enqueues action for processing. action.ActorID must be set to authenticated client's ID by caller
@@ -176,72 +209,54 @@ func (s *Session) Submit(
 	expectedStateVer uint64,
 	sender Sender,
 ) {
-	request := &submitMsg{
+	s.send(ctx, sessionMsg{submit: &submitMsg{
 		action:           action,
 		sessionID:        sessionID,
 		expectedStateVer: expectedStateVer,
 		sender:           sender,
-	}
-	select {
-	case s.inbox <- sessionMsg{submit: request}:
-	case <-ctx.Done():
-	}
+	}})
 }
 
 // Returns the actions clientID may currently take. Empty before the match starts.
 func (s *Session) LegalMoves(ctx context.Context, clientID string) []game.ActionSpec {
 	reply := make(chan []game.ActionSpec, 1)
-	select {
-	case s.inbox <- sessionMsg{legalMoves: &legalMovesMsg{clientID: clientID, reply: reply}}:
-	case <-ctx.Done():
+	if !s.send(ctx, sessionMsg{legalMoves: &legalMovesMsg{clientID: clientID, reply: reply}}) {
 		return nil
 	}
-	select {
-	case moves := <-reply:
-		return moves
-	case <-ctx.Done():
-		return nil
-	}
+	moves, _ := await(ctx, s, reply)
+	return moves
 }
 
-// Returns a snapshot of the session for listings. ok is false if ctx was cancelled
+// Returns a snapshot of the session for listings. ok is false if ctx was cancelled or the Session has stopped
 func (s *Session) Info(ctx context.Context) (info transport.SessionInfo, ok bool) {
 	reply := make(chan transport.SessionInfo, 1)
-	select {
-	case s.inbox <- sessionMsg{info: &infoMsg{reply: reply}}:
-	case <-ctx.Done():
+	if !s.send(ctx, sessionMsg{info: &infoMsg{reply: reply}}) {
 		return transport.SessionInfo{}, false
 	}
-	select {
-	case info := <-reply:
-		return info, true
-	case <-ctx.Done():
-		return transport.SessionInfo{}, false
-	}
+	return await(ctx, s, reply)
 }
 
 // Returns the results of every match finished in this session, with the oldest first
 func (s *Session) History(ctx context.Context) []transport.MatchResult {
 	reply := make(chan []transport.MatchResult, 1)
-	select {
-	case s.inbox <- sessionMsg{history: &historyMsg{reply: reply}}:
-	case <-ctx.Done():
+	if !s.send(ctx, sessionMsg{history: &historyMsg{reply: reply}}) {
 		return nil
 	}
-	select {
-	case matches := <-reply:
-		return matches
-	case <-ctx.Done():
-		return nil
-	}
+	matches, _ := await(ctx, s, reply)
+	return matches
 }
 
-// Session's actor loop. Owns exclusively every mutable field on Session
+// Session's actor loop. Owns exclusively every mutable field on Session. Returns when ctx is
+// cancelled or the last member leaves; either way, later calls into the Session stop waiting
 func (s *Session) Run(ctx context.Context) {
+	defer close(s.stopped)
 	for {
 		select {
 		case msg := <-s.inbox:
 			s.handle(msg)
+			if s.emptied {
+				return // handle nothing else, so no one joins a Session that has been removed
+			}
 		case <-ctx.Done():
 			return
 		}
@@ -319,7 +334,11 @@ func (s *Session) handleLeave(l *leaveMsg) {
 	}
 	s.stateVersion++
 	if len(s.members) == 0 {
-		return // caller removes Session from store
+		s.emptied = true
+		if s.onEmpty != nil {
+			s.onEmpty() // the store removes this Session and cancels its context
+		}
+		return
 	}
 	if s.current == nil && s.readyToStart() {
 		s.startMatch("", 0) // the leaver was the last member not ready
