@@ -84,7 +84,7 @@ func Serve(ctx context.Context, listener net.Listener, config ServerConfig, game
 	sem := make(chan struct{}, config.MaxConnections)
 	var wg sync.WaitGroup
 
-	sessions := session.NewSessionStore()
+	sessions := session.NewSessionStore(ctx)
 
 	go func() {
 		<-ctx.Done()
