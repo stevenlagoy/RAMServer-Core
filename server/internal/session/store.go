@@ -8,8 +8,7 @@ import (
 	"github.com/stevenlagoy/ramserver-core/server/game"
 )
 
-// Owns the lifetime of every active Session. Each one runs under its own context derived from the
-// store's, never a connection's, so a Session outlives the player who created it.
+// Owns the lifetime of every active Session.
 type SessionStore struct {
 	ctx      context.Context // the server's lifetime
 	mu       sync.Mutex
@@ -21,7 +20,6 @@ type storedSession struct {
 	cancel  context.CancelFunc // stops the Session's Run goroutine
 }
 
-// Creates a store whose Sessions all stop when ctx is cancelled
 func NewSessionStore(ctx context.Context) *SessionStore {
 	return &SessionStore{ctx: ctx, sessions: make(map[string]storedSession)}
 }
