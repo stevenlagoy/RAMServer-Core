@@ -128,7 +128,7 @@ type ClientMessage struct {
 	ReconnectToken string
 
 	// KindJoinSession (GameID, SessionID, CreateNew, PrivateSession); KindListSessions (GameID, an optional filter);
-	// KindLeaveSession, KindAction, KindSetReady, KindLegalActions and KindMatchHistory (SessionID)	GameID    string
+	// KindLeaveSession, KindAction, KindSetReady, KindLegalActions and KindMatchHistory (SessionID)
 	GameID         string
 	SessionID      string
 	CreateNew      bool
