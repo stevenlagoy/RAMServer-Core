@@ -78,7 +78,11 @@ func TestViewIsTheCurrentPosition(t *testing.T) {
 		}
 	}
 
-	s.Submit(ctx, game.Action{ID: 5, ActorID: "white", Payload: []byte("e2e4")})
+	s.Submit(ctx, game.Action{
+		ID:      5,
+		ActorID: "white",
+		Payload: []byte("e2e4"),
+	}, s.ID, started[0].GetStateVersion(), white)
 	const afterE4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
 	for _, r := range []*recorder{white, black} {
 		if got := string(r.next(t).GetStateUpdate().GetEncodedView()); got != afterE4 {
@@ -88,18 +92,37 @@ func TestViewIsTheCurrentPosition(t *testing.T) {
 }
 
 func TestCheckmateEndsTheSessionMatch(t *testing.T) {
-	s, ctx, white, black, _ := startChessMatch(t)
+	s, ctx, white, black, started := startChessMatch(t)
+	stateVersion := started[0].GetStateVersion()
 
 	// Fool's mate: 1. f3 e5 2. g4 Qh4#
 	moves := []struct{ actor, uci string }{
 		{"white", "f2f3"}, {"black", "e7e5"}, {"white", "g2g4"}, {"black", "d8h4"},
 	}
+
+	senders := map[string]*recorder{
+		"white": white,
+		"black": black,
+	}
+
 	for i, m := range moves {
-		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: m.actor, Payload: []byte(m.uci)})
+		seq := uint64(10 + i)
+
+		s.Submit(ctx, game.Action{
+			ID:      seq,
+			ActorID: m.actor,
+			Payload: []byte(m.uci),
+		}, s.ID, stateVersion, senders[m.actor])
+
 		for _, r := range []*recorder{white, black} {
-			if got := r.next(t); got.GetStateUpdate() == nil {
+			got := r.next(t)
+			update := got.GetStateUpdate()
+
+			if update == nil {
 				t.Fatalf("move %s: expected a StateUpdate, got %v", m.uci, got)
 			}
+
+			stateVersion = update.GetStateVersion()
 		}
 	}
 
