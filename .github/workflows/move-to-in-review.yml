@@ -26,7 +26,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BODY=$(gh pr view "${{ github.event.pull_request.number }}" --json body -q .body)
+          BODY=$(gh pr view "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" --json body -q .body)
           if [[ "$BODY" =~ [Rr]eview(s|ed)?[[:space:]]+#([0-9]+) ]]; then
             echo "issue_number=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
             echo "found=true" >> "$GITHUB_OUTPUT"

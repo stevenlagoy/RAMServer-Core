@@ -1,0 +1,149 @@
+@startuml 06_protocol_messages
+title Wire Protocol v1.0: Message Schema (package ramserver.v1)
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam class<<pending>> {
+  BackgroundColor #FFF3CD
+  BorderColor #B8860B
+}
+hide empty methods
+
+class ClientMessage <<envelope>> {
+  sequence : uint64
+  oneof payload
+}
+class ServerMessage <<envelope>> {
+  in_reply_to : uint64
+  oneof payload
+}
+
+class ConnectRequest {
+  protocol_version : string
+  client_name : string
+}
+class AuthRequest {
+  display_name : string
+  player_id : string
+  reconnect_token : string
+}
+class JoinSessionRequest {
+  game_id : string
+  session_id : string
+}
+class LeaveSessionRequest {
+  session_id : string
+}
+class ActionRequest {
+  session_id : string
+  encoded_action : bytes
+  expected_state_version : uint64
+}
+class SetReadyRequest {
+  session_id : string
+  ready : bool
+}
+class LegalActionsRequest {
+  session_id : string
+}
+
+class ConnectResponse {
+  connection_id : string
+  server_protocol_version : string
+}
+class AuthResponse {
+  player_id : string
+  reconnect_token : string
+  session_id : string
+}
+class StateUpdate {
+  session_id : string
+  game_id : string
+  status : SessionStatus
+  state_version : uint64
+  encoded_view : bytes
+  active_player_id : string
+  player_order : string[]
+}
+class SessionPlayer {
+  player_id : string
+  display_name : string
+  connected : bool
+}
+class LeaveSessionResponse {
+  session_id : string
+}
+class ErrorResponse {
+  code : ErrorCode
+  message : string
+  session_id : string
+}
+class MatchResult {
+  session_id : string
+  winner_player_ids : string[]
+  draw : bool
+  reason : MatchEndReason
+}
+class PlayerActionSummary {
+  player_id : string
+  actions_accepted : int32
+  actions_rejected : int32
+}
+class LegalActionsResponse {
+  actions : ActionSpec[]
+}
+
+enum SessionStatus {
+  WAITING
+  READY
+  STARTING
+  IN_PROGRESS
+  CLOSED
+}
+enum MatchEndReason {
+  COMPLETED
+  FORFEIT
+  DISCONNECT
+  ABORTED
+}
+enum ErrorCode {
+  INVALID_PROTOCOL_VERSION
+  AUTH_FAILED
+  UNKNOWN_GAME
+  SESSION_NOT_FOUND
+  SESSION_NOT_JOINABLE
+  OUT_OF_TURN
+  ILLEGAL_ACTION
+  MALFORMED_MESSAGE
+  INVALID_STATE
+  NOT_IN_SESSION
+  ALREADY_IN_SESSION
+  INVALID_ARGUMENT
+  STALE_STATE
+  INTERNAL
+}
+
+ClientMessage *-- ConnectRequest
+ClientMessage *-- AuthRequest
+ClientMessage *-- JoinSessionRequest
+ClientMessage *-- LeaveSessionRequest
+ClientMessage *-- ActionRequest
+ClientMessage *-- SetReadyRequest
+ClientMessage *-- LegalActionsRequest
+ServerMessage *-- ConnectResponse
+ServerMessage *-- AuthResponse
+ServerMessage *-- StateUpdate
+ServerMessage *-- ErrorResponse
+ServerMessage *-- MatchResult
+ServerMessage *-- LeaveSessionResponse
+ServerMessage *-- LegalActionsResponse
+StateUpdate "1" *-- "*" SessionPlayer
+MatchResult "1" *-- "*" PlayerActionSummary
+StateUpdate --> SessionStatus
+MatchResult --> MatchEndReason
+ErrorResponse --> ErrorCode
+legend right
+  Yellow messages come from the open pull request
+  "Add ready-up and legal-actions messages". Names and fields are provisional.
+  Frames: 4-byte big-endian length prefix, then one envelope. A zero-length frame is a heartbeat.
+endlegend
+@enduml
