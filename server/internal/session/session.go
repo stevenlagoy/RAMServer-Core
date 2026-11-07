@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"runtime/debug"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
@@ -43,21 +44,23 @@ type Session struct {
 
 	// Below owned exclusively by Run goroutine
 
-	order   []string // join order, order[0] is current owner
-	members map[string]*Member
-	history []MatchResult
-	current *match.Match
+	order        []string // join order, order[0] is current owner
+	members      map[string]*Member
+	history      []MatchResult
+	current      *match.Match
+	stateVersion uint64
 }
 
 // Creates an empty Session; its creator joins through Join like any other member
 func NewSession(id, gameName string, g game.Game, public bool) *Session {
 	return &Session{
-		ID:       id,
-		GameName: gameName,
-		Game:     g,
-		Public:   public,
-		inbox:    make(chan sessionMsg),
-		members:  make(map[string]*Member),
+		ID:           id,
+		GameName:     gameName,
+		Game:         g,
+		Public:       public,
+		inbox:        make(chan sessionMsg),
+		members:      make(map[string]*Member),
+		stateVersion: 1,
 	}
 }
 
@@ -74,10 +77,16 @@ type sessionMsg struct {
 	join       *joinMsg
 	leave      *leaveMsg
 	setReady   *setReadyMsg
-	submit     *game.Action
+	submit     *submitMsg
 	legalMoves *legalMovesMsg
 }
 
+type submitMsg struct {
+	action           game.Action
+	sessionID        string
+	expectedStateVer uint64
+	sender           Sender
+}
 type joinMsg struct {
 	clientID    string
 	displayName string
@@ -102,7 +111,18 @@ var (
 	// Returned by Join when game's role limits have no room for participant
 	ErrLobbyFull = transport.WrapError(transport.CodeSessionNotJoinable, errors.New("lobby is full"))
 	// Returned by Join when a match is already in progress and game does not allow joining mid-match
-	ErrAlreadyStarted = transport.WrapError(transport.CodeSessionNotJoinable, errors.New("match already in progress"))
+	ErrAlreadyStarted = transport.WrapError(
+		transport.CodeSessionNotJoinable,
+		errors.New("match already in progress"),
+	)
+
+	ErrNotInSession = errors.New(
+		"player is not in the requested session",
+	)
+
+	ErrStaleState = errors.New(
+		"action was submitted against an outdated state",
+	)
 )
 
 // Adds clientID to the lobby, blocking until Run processes the request or ctx is cancelled.
@@ -141,9 +161,21 @@ func (s *Session) SetReady(ctx context.Context, clientID string, ready bool, seq
 }
 
 // Enqueues action for processing. action.ActorID must be set to authenticated client's ID by caller
-func (s *Session) Submit(ctx context.Context, action game.Action) {
+func (s *Session) Submit(
+	ctx context.Context,
+	action game.Action,
+	sessionID string,
+	expectedStateVer uint64,
+	sender Sender,
+) {
+	request := &submitMsg{
+		action:           action,
+		sessionID:        sessionID,
+		expectedStateVer: expectedStateVer,
+		sender:           sender,
+	}
 	select {
-	case s.inbox <- sessionMsg{submit: &action}:
+	case s.inbox <- sessionMsg{submit: request}:
 	case <-ctx.Done():
 	}
 }
@@ -190,7 +222,7 @@ func (s *Session) handle(msg sessionMsg) {
 	case msg.setReady != nil:
 		s.handleSetReady(msg.setReady)
 	case msg.submit != nil:
-		s.handleSubmit(*msg.submit)
+		s.handleSubmit(msg.submit)
 	case msg.legalMoves != nil:
 		s.handleLegalMoves(msg.legalMoves)
 	}
@@ -211,6 +243,7 @@ func (s *Session) handleJoin(j *joinMsg) {
 		s.order = append(s.order, j.clientID) // only after the join is accepted, so a rejected joiner never gets a turn
 	}
 	s.members[j.clientID] = &Member{ClientID: j.clientID, DisplayName: j.displayName, Sender: j.sender, Role: role}
+	s.stateVersion++
 	j.reply <- nil
 	s.broadcastState(j.clientID, j.seq)
 }
@@ -240,6 +273,7 @@ func (s *Session) handleLeave(l *leaveMsg) {
 			break
 		}
 	}
+	s.stateVersion++
 	if len(s.members) == 0 {
 		return // caller removes Session from store
 	}
@@ -255,17 +289,27 @@ func (s *Session) handleSetReady(r *setReadyMsg) {
 	if !ok {
 		return
 	}
+
 	if s.current != nil {
-		perr := transport.NewError(transport.CodeInvalidState, "the match has already started")
+		perr := transport.NewError(
+			transport.CodeInvalidState,
+			"the match has already started",
+		)
 		perr.SessionID = s.ID
 		member.Sender.Send(transport.EncodeError(r.seq, perr))
 		return
 	}
-	member.Ready = r.ready
+
+	if member.Ready != r.ready {
+		member.Ready = r.ready
+		s.stateVersion++
+	}
+
 	if s.readyToStart() {
 		s.startMatch(r.clientID, r.seq)
 		return
 	}
+
 	s.broadcastState(r.clientID, r.seq)
 }
 
@@ -290,26 +334,60 @@ func (s *Session) startMatch(requesterID string, seq uint64) {
 	s.broadcastState(requesterID, seq)
 }
 
-func (s *Session) handleSubmit(action game.Action) {
-	if s.current == nil {
+func (s *Session) handleSubmit(req *submitMsg) {
+	action := req.action
+
+	if req.sessionID != s.ID {
+		s.rejectAction(req, transport.CodeNotInSession, ErrNotInSession)
 		return
 	}
-	member, ok := s.members[action.ActorID]
-	if !ok {
-		return // stale action from a member who left
+
+	if _, ok := s.members[action.ActorID]; !ok {
+		s.rejectAction(req, transport.CodeNotInSession, ErrNotInSession)
+		return
 	}
-	// Check for out of turn action request
+
+	if req.expectedStateVer != 0 &&
+		req.expectedStateVer != s.stateVersion {
+		s.rejectAction(req, transport.CodeStaleState, ErrStaleState)
+		return
+	}
+
+	if s.current == nil {
+		s.rejectAction(
+			req,
+			transport.CodeIllegalAction,
+			errors.New("action not allowed while the session is waiting"),
+		)
+		return
+	}
+
 	if err := s.current.ApplyAction(action); err != nil {
 		code := transport.CodeIllegalAction
-		if errors.Is(err, match.ErrNotYourTurn) {
+
+		switch {
+		case errors.Is(err, match.ErrNotYourTurn):
 			code = transport.CodeOutOfTurn
+		case errors.Is(err, game.ErrMalformedAction):
+			code = transport.CodeMalformedMessage
 		}
-		perr := transport.WrapError(code, err)
-		perr.SessionID = s.ID
-		member.Sender.Send(transport.EncodeError(action.ID, perr))
+
+		s.rejectAction(req, code, err)
 		return
 	}
+
+	s.stateVersion++
+
+	slog.Info("action accepted",
+		"session_id", s.ID,
+		"player_id", action.ActorID,
+		"sequence", action.ID,
+		"state_version", s.stateVersion,
+		"match_turn", s.current.Turns,
+	)
+
 	s.broadcastState(action.ActorID, action.ID)
+
 	if result, done := s.current.Outcome(); done {
 		s.endMatch(result)
 	}
@@ -322,6 +400,8 @@ func (s *Session) endMatch(result game.MatchResult) {
 	for _, m := range s.members {
 		m.Ready = false // require re-ready before next round
 	}
+	s.stateVersion++
+	s.broadcastUnsolicitedState()
 }
 
 func (s *Session) handleLegalMoves(l *legalMovesMsg) {
@@ -342,11 +422,11 @@ func (s *Session) viewFor(memberID string) transport.StateUpdate {
 		}
 	}
 	view := transport.StateUpdate{
-		SessionID: s.ID,
-		GameID:    s.GameName,
-		Status:    transport.StatusWaiting,
-		Players:   players,
-		// TODO: StateVersion
+		SessionID:    s.ID,
+		GameID:       s.GameName,
+		Status:       transport.StatusWaiting,
+		Players:      players,
+		StateVersion: s.stateVersion,
 	}
 	if s.current != nil {
 		view.Status = transport.StatusInProgress
@@ -386,4 +466,26 @@ func (s *Session) broadcastMatchEnded(result game.MatchResult, turns int) {
 	for _, m := range s.members {
 		m.Sender.Send(payload) // identical for every recipient, so the slice is shared
 	}
+}
+
+func (s *Session) rejectAction(
+	req *submitMsg,
+	code transport.ErrorCode,
+	err error,
+) {
+	action := req.action
+
+	slog.Warn("action rejected",
+		"session_id", req.sessionID,
+		"player_id", action.ActorID,
+		"sequence", action.ID,
+		"state_version", s.stateVersion,
+		"error_code", code.String(),
+		"reason", err.Error(),
+		"match_active", s.current != nil,
+	)
+
+	perr := transport.WrapError(code, err)
+	perr.SessionID = req.sessionID
+	req.sender.Send(transport.EncodeError(action.ID, perr))
 }
