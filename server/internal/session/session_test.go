@@ -691,6 +691,28 @@ func TestCompletedMatchPersists(t *testing.T) {
 		t.Fatalf("expected 3 actions, got %d", len(saved.Actions))
 	}
 
+	// Verify that state versions were persisted correctly.
+	for i, action := range saved.Actions {
+		if action.StateVersion == nil {
+			t.Fatalf("action %d: missing state version", i)
+		}
+
+		if i == 0 {
+			continue
+		}
+
+		previous := *saved.Actions[i-1].StateVersion
+		current := *action.StateVersion
+
+		if action.Outcome == persistence.ActionAccepted && current != previous+1 {
+			t.Errorf("action %d: accepted action should increment state version", i)
+		}
+
+		if action.Outcome == persistence.ActionRejected && current != previous {
+			t.Errorf("action %d: rejected action should not increment state version", i)
+		}
+	}
+
 	expectedActors := []string{"bob", "alice", "bob"}
 	expectedOutcomes := []string{
 		persistence.ActionRejected,

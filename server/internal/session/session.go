@@ -392,6 +392,7 @@ func (s *Session) recordMatchAction(
 	payload := make([]byte, len(action.Payload))
 	copy(payload, action.Payload)
 
+	version := int64(s.stateVersion)
 	s.matchActions = append(
 		s.matchActions,
 		persistence.ActionRecord{
@@ -402,6 +403,7 @@ func (s *Session) recordMatchAction(
 			Outcome:         outcome,
 			RejectionCode:   rejectionCode,
 			RejectionReason: rejectionReason,
+			StateVersion:    &version,
 		},
 	)
 
