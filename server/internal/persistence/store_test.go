@@ -149,6 +149,40 @@ func TestSaveMatch(t *testing.T) {
 		)
 	}
 
+	// Saving the same match again must be idempotent.
+	retryID, err := store.SaveMatch(context.Background(), record)
+	if err != nil {
+		t.Fatalf("retrying the same match failed: %v", err)
+	}
+
+	if retryID != matchID {
+		t.Errorf(
+			"retry returned match ID %d, expected %d",
+			retryID,
+			matchID,
+		)
+	}
+
+	var matchCount int
+	err = store.db.QueryRow(
+		`SELECT COUNT(*) FROM "match"`,
+	).Scan(&matchCount)
+	if err != nil {
+		t.Fatalf("count matches: %v", err)
+	}
+
+	if matchCount != 1 {
+		t.Errorf("expected 1 stored match, got %d", matchCount)
+	}
+
+	// The same match identity must not silently accept different data.
+	conflicting := record
+	conflicting.TerminationReason = "ABORTED"
+
+	if _, err := store.SaveMatch(context.Background(), conflicting); err == nil {
+		t.Error("expected conflicting match data to be rejected")
+	}
+
 }
 
 func TestSaveMatchRollback(t *testing.T) {

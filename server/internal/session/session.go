@@ -292,10 +292,13 @@ func (s *Session) handleLeave(l *leaveMsg) {
 			break
 		}
 	}
+
 	s.stateVersion++
+
 	if len(s.members) == 0 {
 		return // caller removes Session from store
 	}
+
 	if s.current == nil && s.readyToStart() {
 		s.startMatch("", 0) // the leaver was the last member not ready
 		return
@@ -498,6 +501,70 @@ func (s *Session) handleSubmit(req *submitMsg) {
 	}
 }
 
+func (s *Session) saveTerminalMatch(
+	reason string,
+	winners []string,
+	isDraw bool,
+) {
+	if s.persist == nil {
+		return
+	}
+
+	// Identify the winning players.
+	winnerSet := make(map[string]bool, len(winners))
+	for _, id := range winners {
+		winnerSet[id] = true
+	}
+
+	// Copy the participant snapshot and assign winners.
+	participants := append(
+		[]persistence.ParticipantRecord(nil),
+		s.matchParticipants...,
+	)
+
+	for i := range participants {
+		participants[i].IsWinner =
+			winnerSet[participants[i].ClientID]
+	}
+
+	// Preserve the action history.
+	actions := append(
+		[]persistence.ActionRecord(nil),
+		s.matchActions...,
+	)
+
+	// Construct the database record.
+	record := persistence.MatchRecord{
+		SessionID:         s.ID,
+		SessionCreatedAt:  s.createdAt,
+		MatchNumber:       s.matchNumber,
+		GameID:            s.GameName,
+		StartedAt:         s.matchStartedAt,
+		EndedAt:           time.Now().UTC(),
+		TerminationReason: reason,
+		IsDraw:            isDraw,
+		Participants:      participants,
+		Actions:           actions,
+	}
+
+	// Save the match with a five-second timeout.
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		5*time.Second,
+	)
+	defer cancel()
+
+	_, err := s.persist.SaveMatch(ctx, record)
+	if err != nil {
+		log.Printf(
+			"session %s: failed to save match %d: %v",
+			s.ID,
+			s.matchNumber,
+			err,
+		)
+	}
+}
+
 func (s *Session) endMatch(result game.MatchResult) {
 	// Preserve the existing match-end behavior.
 	s.history = append(s.history, MatchResult{
@@ -507,67 +574,14 @@ func (s *Session) endMatch(result game.MatchResult) {
 
 	s.broadcastMatchEnded(result, s.current.Turns)
 
-	// Save the completed match if persistence is enabled.
-	if s.persist != nil {
-		winners := result.GetWinnerIDs()
-		winnerSet := make(map[string]bool, len(winners))
-
-		for _, id := range winners {
-			winnerSet[id] = true
-		}
-
-		// Copy the participant snapshot and assign winners.
-		participants := append(
-			[]persistence.ParticipantRecord(nil),
-			s.matchParticipants...,
-		)
-
-		for i := range participants {
-			participants[i].IsWinner =
-				winnerSet[participants[i].ClientID]
-		}
-
-		// Preserve the action history.
-		actions := append(
-			[]persistence.ActionRecord(nil),
-			s.matchActions...,
-		)
-
-		reason := string(result.TerminationReason())
-		if reason == "" {
-			reason = "COMPLETED"
-		}
-
-		record := persistence.MatchRecord{
-			SessionID:         s.ID,
-			SessionCreatedAt:  s.createdAt,
-			MatchNumber:       s.matchNumber,
-			GameID:            s.GameName,
-			StartedAt:         s.matchStartedAt,
-			EndedAt:           time.Now().UTC(),
-			TerminationReason: reason,
-			IsDraw:            len(winners) == 0,
-			Participants:      participants,
-			Actions:           actions,
-		}
-
-		ctx, cancel := context.WithTimeout(
-			context.Background(),
-			5*time.Second,
-		)
-
-		_, err := s.persist.SaveMatch(ctx, record)
-		cancel()
-
-		if err != nil {
-			log.Printf(
-				"session %s: failed to save match %d: %v",
-				s.ID,
-				s.matchNumber,
-				err,
-			)
-		}
+	// Persist the completed match.
+	reason := string(result.TerminationReason())
+	if reason == "" {
+		reason = "COMPLETED"
 	}
+
+	winners := result.GetWinnerIDs()
+	s.saveTerminalMatch(reason, winners, len(winners) == 0)
 
 	// Return to the waiting state.
 	s.current = nil
@@ -575,6 +589,7 @@ func (s *Session) endMatch(result game.MatchResult) {
 	for _, m := range s.members {
 		m.Ready = false
 	}
+
 	s.stateVersion++
 	s.broadcastUnsolicitedState()
 }

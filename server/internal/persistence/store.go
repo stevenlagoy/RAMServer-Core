@@ -3,6 +3,8 @@ package persistence
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"sort"
 	"time"
 )
 
@@ -106,6 +108,7 @@ func (s *SQLiteStore) SaveMatch(ctx context.Context, record MatchRecord) (int64,
         action_count
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(session_id, match_number) DO NOTHING
 	`,
 		record.SessionID,
 		record.MatchNumber,
@@ -120,6 +123,45 @@ func (s *SQLiteStore) SaveMatch(ctx context.Context, record MatchRecord) (int64,
 
 	if err != nil {
 		return 0, fmt.Errorf("persistence: save match: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("persistence: check inserted rows: %w", err)
+	}
+
+	if affected == 0 {
+		// Release the transaction before using GetMatch.
+		if err := tx.Rollback(); err != nil {
+			return 0, fmt.Errorf("persistence: rollback duplicate insert: %w", err)
+		}
+
+		var existingID int64
+
+		err := s.db.QueryRowContext(ctx, `
+        SELECT match_id
+        FROM "match"
+        WHERE session_id = ? AND match_number = ?
+    `, record.SessionID, record.MatchNumber).Scan(&existingID)
+
+		if err != nil {
+			return 0, fmt.Errorf("persistence: find existing match: %w", err)
+		}
+
+		existing, err := s.GetMatch(ctx, existingID)
+		if err != nil {
+			return 0, fmt.Errorf("persistence: load existing match: %w", err)
+		}
+
+		if !reflect.DeepEqual(normalizeMatch(record), normalizeMatch(existing)) {
+			return 0, fmt.Errorf(
+				"persistence: conflicting data for session %s match %d",
+				record.SessionID,
+				record.MatchNumber,
+			)
+		}
+
+		return existingID, nil
 	}
 
 	matchID, err := result.LastInsertId()
@@ -228,6 +270,37 @@ func (s *SQLiteStore) SaveMatch(ctx context.Context, record MatchRecord) (int64,
 
 	return matchID, nil
 
+}
+
+func normalizeMatch(record MatchRecord) MatchRecord {
+	// Database-generated IDs don't distinguish retry payloads.
+	record.ID = 0
+
+	// Normalize timestamps to match their stored UTC representation.
+	record.SessionCreatedAt = record.SessionCreatedAt.UTC().Round(0)
+	record.StartedAt = record.StartedAt.UTC().Round(0)
+	record.EndedAt = record.EndedAt.UTC().Round(0)
+
+	// Database retrieval orders participants by seat.
+	record.Participants = append(
+		[]ParticipantRecord(nil),
+		record.Participants...,
+	)
+	sort.Slice(record.Participants, func(i, j int) bool {
+		return record.Participants[i].Seat < record.Participants[j].Seat
+	})
+
+	// Normalize action timestamps without modifying the original.
+	record.Actions = append(
+		[]ActionRecord(nil),
+		record.Actions...,
+	)
+	for i := range record.Actions {
+		record.Actions[i].ReceivedAt =
+			record.Actions[i].ReceivedAt.UTC().Round(0)
+	}
+
+	return record
 }
 
 func (s *SQLiteStore) GetMatch(ctx context.Context, id int64) (MatchRecord, error) {

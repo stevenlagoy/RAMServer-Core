@@ -6,7 +6,9 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/persistence"
@@ -28,11 +30,27 @@ func main() {
 		dbPath = "data/ramserver.sqlite"
 	}
 
-	store, err := persistence.Open(dbPath)
+	sqliteStore, err := persistence.Open(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize persistence: %v", err)
 	}
-	defer store.Close()
+	defer sqliteStore.Close()
+
+	pendingDir := os.Getenv("RAMSERVER_PENDING_DIR")
+	if pendingDir == "" {
+		pendingDir = filepath.Join(filepath.Dir(dbPath), "pending")
+	}
+
+	store := persistence.NewRecoverableStore(sqliteStore, pendingDir)
+
+	recoveryCtx, cancelRecovery := context.WithTimeout(
+		context.Background(),
+		30*time.Second,
+	)
+	if err := store.RecoverPending(recoveryCtx); err != nil {
+		log.Printf("Pending match recovery incomplete: %v", err)
+	}
+	cancelRecovery()
 
 	log.Printf("SQLite database initialized at %s", dbPath)
 

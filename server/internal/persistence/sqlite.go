@@ -55,7 +55,7 @@ func (s *SQLiteStore) initialize(ctx context.Context) error {
 
 	for _, pragma := range []string{
 		"PRAGMA foreign_keys = ON",
-		"PRAGMA busy_timeout = 5000",
+		"PRAGMA busy_timeout = 250",
 	} {
 		if _, err := s.db.ExecContext(ctx, pragma); err != nil {
 			return fmt.Errorf("persistence: configure SQLite: %w", err)
