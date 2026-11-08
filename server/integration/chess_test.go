@@ -46,7 +46,7 @@ func startChessMatch(t *testing.T) (*session.Session, context.Context, *recorder
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	s := session.NewSession("s1", chess.Name, &chess.Game{}, true)
+	s := session.NewSession("s1", chess.Name, &chess.Game{}, true, nil)
 	go s.Run(ctx)
 
 	white, black := newRecorder(), newRecorder()

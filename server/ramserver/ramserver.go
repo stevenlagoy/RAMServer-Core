@@ -17,7 +17,7 @@ type Config = server.ServerConfig
 func DefaultConfig() server.ServerConfig { return server.DefaultConfig() }
 
 func Serve(ctx context.Context, l net.Listener, cfg Config, games *game.Registry) error {
-	return server.Serve(ctx, l, cfg, games)
+	return server.Serve(ctx, l, cfg, games, nil)
 }
 
 /*

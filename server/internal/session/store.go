@@ -6,16 +6,22 @@ import (
 	"sync"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
+	"github.com/stevenlagoy/ramserver-core/server/internal/persistence"
 )
 
 // Owns the lifetime of every active Session.
+
 type SessionStore struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
+	persist  persistence.Store
 }
 
-func NewSessionStore() *SessionStore {
-	return &SessionStore{sessions: make(map[string]*Session)}
+func NewSessionStore(persist persistence.Store) *SessionStore {
+	return &SessionStore{
+		sessions: make(map[string]*Session),
+		persist:  persist,
+	}
 }
 
 // Starts a new, empty Session for g under gameName and runs it until ctx is
@@ -32,7 +38,7 @@ func (st *SessionStore) Create(
 	if _, exists := st.sessions[id]; exists {
 		return nil, fmt.Errorf("session: id %q already in use", id)
 	}
-	s := NewSession(id, gameName, g, public)
+	s := NewSession(id, gameName, g, public, st.persist)
 	st.sessions[id] = s
 	go s.Run(ctx)
 	return s, nil

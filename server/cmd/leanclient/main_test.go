@@ -3,10 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
-	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"net"
 	"testing"
 	"time"
+
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
@@ -113,7 +114,7 @@ func dialTestServer(t *testing.T) net.Conn {
 		defer close(done)
 		games := game.NewRegistry()
 		games.Register("stub", func() game.Game { return &StubGame.StubGame{} })
-		server.Serve(ctx, ln, server.DefaultConfig(), games)
+		server.Serve(ctx, ln, server.DefaultConfig(), games, nil)
 	}()
 	t.Cleanup(func() {
 		cancel()

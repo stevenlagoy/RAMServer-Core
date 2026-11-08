@@ -3,13 +3,14 @@ package session
 import (
 	"context"
 	"fmt"
-	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"sync"
 	"testing"
+
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 )
 
 func TestNewStore(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(nil)
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
@@ -21,7 +22,7 @@ func TestNewStore(t *testing.T) {
 }
 
 func TestCreateAndGet(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(nil)
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
@@ -51,7 +52,7 @@ func TestCreateAndGet(t *testing.T) {
 }
 
 func TestCreateDuplicateID(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(nil)
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
@@ -72,7 +73,7 @@ func TestCreateDuplicateID(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(nil)
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
@@ -107,7 +108,7 @@ func TestList(t *testing.T) {
 }
 
 func TestRemove(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(nil)
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
@@ -136,7 +137,7 @@ func TestRemove(t *testing.T) {
 }
 
 func TestSessionStoreConcurrency(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(nil)
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}

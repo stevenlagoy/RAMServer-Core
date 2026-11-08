@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
+	"github.com/stevenlagoy/ramserver-core/server/internal/persistence"
 	"github.com/stevenlagoy/ramserver-core/server/internal/server"
 	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"github.com/stevenlagoy/ramserver-core/server/rulesets/chess"
@@ -21,6 +22,19 @@ func main() {
 	if addr == "" {
 		addr = defaultAddr
 	}
+
+	dbPath := os.Getenv("RAMSERVER_DB_PATH")
+	if dbPath == "" {
+		dbPath = "data/ramserver.sqlite"
+	}
+
+	store, err := persistence.Open(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to initialize persistence: %v", err)
+	}
+	defer store.Close()
+
+	log.Printf("SQLite database initialized at %s", dbPath)
 
 	// Create a TCP listener
 	listener, err := net.Listen("tcp", addr)
@@ -37,7 +51,7 @@ func main() {
 	if os.Getenv("RAMSERVER_STUB_GAME") != "" {
 		games.Register("stub", func() game.Game { return &StubGame.StubGame{} }) // for manual testing with leanclient
 	}
-	if err := server.Serve(ctx, listener, server.DefaultConfig(), games); err != nil {
+	if err := server.Serve(ctx, listener, server.DefaultConfig(), games, store); err != nil {
 		log.Fatal(err)
 	}
 }

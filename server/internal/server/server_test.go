@@ -5,12 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"io"
 	"net"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
 	"google.golang.org/protobuf/proto"
@@ -75,7 +76,7 @@ func startTestServer(t *testing.T, cfg ServerConfig) (string, func()) {
 		games := game.NewRegistry()
 		games.Register("stub", func() game.Game { return &StubGame.StubGame{} })
 		games.Register("stub-solo", func() game.Game { return &StubGame.StubGame{MaxPlayers: 1} })
-		Serve(ctx, ln, cfg, games)
+		Serve(ctx, ln, cfg, games, nil)
 	}()
 	stop := func() {
 		cancel()

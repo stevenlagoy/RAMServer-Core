@@ -5,9 +5,11 @@ import (
 	"errors"
 	"log"
 	"runtime/debug"
+	"time"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/match"
+	"github.com/stevenlagoy/ramserver-core/server/internal/persistence"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
 
@@ -39,10 +41,18 @@ type Session struct {
 	Game     game.Game
 	Public   bool
 
-	inbox chan sessionMsg
+	inbox   chan sessionMsg
+	persist persistence.Store
+
+	createdAt time.Time
+
+	// Owned by the Session.Run goroutine.
+	matchNumber       int
+	matchStartedAt    time.Time
+	matchParticipants []persistence.ParticipantRecord
+	matchActions      []persistence.ActionRecord
 
 	// Below owned exclusively by Run goroutine
-
 	order   []string // join order, order[0] is current owner
 	members map[string]*Member
 	history []MatchResult
@@ -50,14 +60,22 @@ type Session struct {
 }
 
 // Creates an empty Session; its creator joins through Join like any other member
-func NewSession(id, gameName string, g game.Game, public bool) *Session {
+
+func NewSession(
+	id, gameName string,
+	g game.Game,
+	public bool,
+	persist persistence.Store,
+) *Session {
 	return &Session{
-		ID:       id,
-		GameName: gameName,
-		Game:     g,
-		Public:   public,
-		inbox:    make(chan sessionMsg),
-		members:  make(map[string]*Member),
+		ID:        id,
+		GameName:  gameName,
+		Game:      g,
+		Public:    public,
+		inbox:     make(chan sessionMsg),
+		members:   make(map[string]*Member),
+		persist:   persist,
+		createdAt: time.Now().UTC(),
 	}
 }
 
@@ -286,8 +304,77 @@ func (s *Session) startMatch(requesterID string, seq uint64) {
 	for id, m := range s.members {
 		roles[id] = m.Role
 	}
-	s.current = match.NewMatch(s.Game, append([]string(nil), s.order...), roles) // copy order
+
+	s.current = match.NewMatch(
+		s.Game,
+		append([]string(nil), s.order...),
+		roles,
+	)
+
+	// Record metadata for the new match.
+	s.matchNumber++
+	s.matchStartedAt = time.Now().UTC()
+	s.matchActions = nil
+
+	// Snapshot the original match participants.
+	s.matchParticipants = make(
+		[]persistence.ParticipantRecord,
+		0,
+		len(s.current.RosterOrder),
+	)
+
+	for seat, id := range s.current.RosterOrder {
+		member := s.members[id]
+
+		s.matchParticipants = append(
+			s.matchParticipants,
+			persistence.ParticipantRecord{
+				ClientID:    member.ClientID,
+				DisplayName: member.DisplayName,
+				Role:        string(member.Role),
+				Seat:        seat,
+			},
+		)
+	}
+
 	s.broadcastState(requesterID, seq)
+}
+
+func (s *Session) recordMatchAction(
+	action game.Action,
+	outcome, rejectionCode, rejectionReason string,
+) {
+	payload := make([]byte, len(action.Payload))
+	copy(payload, action.Payload)
+
+	s.matchActions = append(
+		s.matchActions,
+		persistence.ActionRecord{
+			Seq:             int64(len(s.matchActions) + 1),
+			ClientID:        action.ActorID,
+			ReceivedAt:      time.Now().UTC(),
+			Payload:         payload,
+			Outcome:         outcome,
+			RejectionCode:   rejectionCode,
+			RejectionReason: rejectionReason,
+		},
+	)
+
+	for i := range s.matchParticipants {
+		p := &s.matchParticipants[i]
+
+		if p.ClientID != action.ActorID {
+			continue
+		}
+
+		if outcome == persistence.ActionAccepted {
+			p.ActionsAccepted++
+		} else {
+			p.ActionsRejected++
+		}
+
+		break
+	}
 }
 
 func (s *Session) handleSubmit(action game.Action) {
@@ -303,12 +390,28 @@ func (s *Session) handleSubmit(action game.Action) {
 		code := transport.CodeIllegalAction
 		if errors.Is(err, match.ErrNotYourTurn) {
 			code = transport.CodeOutOfTurn
+
+			s.recordMatchAction(
+				action,
+				persistence.ActionRejected,
+				code.String(),
+				err.Error(),
+			)
+
 		}
 		perr := transport.WrapError(code, err)
 		perr.SessionID = s.ID
 		member.Sender.Send(transport.EncodeError(action.ID, perr))
 		return
 	}
+
+	s.recordMatchAction(
+		action,
+		persistence.ActionAccepted,
+		"",
+		"",
+	)
+
 	s.broadcastState(action.ActorID, action.ID)
 	if result, done := s.current.Outcome(); done {
 		s.endMatch(result)
@@ -316,11 +419,81 @@ func (s *Session) handleSubmit(action game.Action) {
 }
 
 func (s *Session) endMatch(result game.MatchResult) {
-	s.history = append(s.history, MatchResult{Turns: s.current.Turns, Result: result})
+	// Preserve the existing match-end behavior.
+	s.history = append(s.history, MatchResult{
+		Turns:  s.current.Turns,
+		Result: result,
+	})
+
 	s.broadcastMatchEnded(result, s.current.Turns)
+
+	// Save the completed match if persistence is enabled.
+	if s.persist != nil {
+		winners := result.GetWinnerIDs()
+		winnerSet := make(map[string]bool, len(winners))
+
+		for _, id := range winners {
+			winnerSet[id] = true
+		}
+
+		// Copy the participant snapshot and assign winners.
+		participants := append(
+			[]persistence.ParticipantRecord(nil),
+			s.matchParticipants...,
+		)
+
+		for i := range participants {
+			participants[i].IsWinner =
+				winnerSet[participants[i].ClientID]
+		}
+
+		// Preserve the action history.
+		actions := append(
+			[]persistence.ActionRecord(nil),
+			s.matchActions...,
+		)
+
+		reason := string(result.TerminationReason())
+		if reason == "" {
+			reason = "COMPLETED"
+		}
+
+		record := persistence.MatchRecord{
+			SessionID:         s.ID,
+			SessionCreatedAt:  s.createdAt,
+			MatchNumber:       s.matchNumber,
+			GameID:            s.GameName,
+			StartedAt:         s.matchStartedAt,
+			EndedAt:           time.Now().UTC(),
+			TerminationReason: reason,
+			IsDraw:            len(winners) == 0,
+			Participants:      participants,
+			Actions:           actions,
+		}
+
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			5*time.Second,
+		)
+
+		_, err := s.persist.SaveMatch(ctx, record)
+		cancel()
+
+		if err != nil {
+			log.Printf(
+				"session %s: failed to save match %d: %v",
+				s.ID,
+				s.matchNumber,
+				err,
+			)
+		}
+	}
+
+	// Return to the waiting state.
 	s.current = nil
+
 	for _, m := range s.members {
-		m.Ready = false // require re-ready before next round
+		m.Ready = false
 	}
 }
 

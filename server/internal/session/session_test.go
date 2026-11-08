@@ -3,14 +3,18 @@ package session
 import (
 	"context"
 	"errors"
-	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
+	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
+	"github.com/stevenlagoy/ramserver-core/server/internal/persistence"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
 
@@ -54,7 +58,7 @@ func TestSessionPipeline_JoinReadyLeave(t *testing.T) {
 
 	g := &StubGame.StubGame{}
 
-	sess := NewSession("session-1", "TestGame", g, true)
+	sess := NewSession("session-1", "TestGame", g, true, nil)
 
 	go sess.Run(ctx)
 
@@ -110,7 +114,7 @@ func TestSessionJoin_RejectFull(t *testing.T) {
 
 	g := &StubGame.StubGame{}
 
-	sess := NewSession("session-1", "TestGame", g, true)
+	sess := NewSession("session-1", "TestGame", g, true, nil)
 
 	go sess.Run(ctx)
 
@@ -142,7 +146,7 @@ func startSession(t *testing.T, g game.Game) (*Session, context.Context) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	s := NewSession("s1", "test", g, true)
+	s := NewSession("s1", "test", g, true, nil)
 	go s.Run(ctx)
 	return s, ctx
 }
@@ -294,5 +298,258 @@ func TestEachMemberReceivesOnlyTheirOwnView(t *testing.T) {
 		if got, want := string(state.GetEncodedView()), "secret-of-"+id; got != want {
 			t.Fatalf("%s's encoded_view = %q, want %q", id, got, want)
 		}
+	}
+}
+
+func TestRecordMatchAction(t *testing.T) {
+	s := &Session{
+		matchParticipants: []persistence.ParticipantRecord{
+			{ClientID: "alice"},
+			{ClientID: "bob"},
+		},
+	}
+
+	// Record an accepted action.
+	payload := []byte("e2e4")
+
+	s.recordMatchAction(
+		game.Action{
+			ActorID: "alice",
+			Payload: payload,
+		},
+		persistence.ActionAccepted,
+		"",
+		"",
+	)
+
+	// Record a rejected action.
+	s.recordMatchAction(
+		game.Action{
+			ActorID: "bob",
+			Payload: []byte("invalid"),
+		},
+		persistence.ActionRejected,
+		"INVALID_ACTION",
+		"Illegal move",
+	)
+
+	// Verify both actions were recorded.
+	if len(s.matchActions) != 2 {
+		t.Fatalf("expected 2 actions, got %d", len(s.matchActions))
+	}
+
+	// Verify ordering and outcomes.
+	if s.matchActions[0].Seq != 1 ||
+		s.matchActions[0].Outcome != persistence.ActionAccepted {
+		t.Errorf("incorrect first action: %+v", s.matchActions[0])
+	}
+
+	if s.matchActions[1].Seq != 2 ||
+		s.matchActions[1].Outcome != persistence.ActionRejected {
+		t.Errorf("incorrect second action: %+v", s.matchActions[1])
+	}
+
+	// Verify participant statistics.
+	if s.matchParticipants[0].ActionsAccepted != 1 {
+		t.Error("Alice's accepted action was not counted")
+	}
+
+	if s.matchParticipants[1].ActionsRejected != 1 {
+		t.Error("Bob's rejected action was not counted")
+	}
+
+	// Verify the payload was copied.
+	payload[0] = 'x'
+
+	if string(s.matchActions[0].Payload) != "e2e4" {
+		t.Error("action payload was not copied")
+	}
+
+	// Verify the rejection information.
+	if s.matchActions[1].RejectionCode != "INVALID_ACTION" {
+		t.Error("rejection code was not preserved")
+	}
+}
+
+func TestCompletedMatchPersists(t *testing.T) {
+	ctx, cancel := context.WithTimeout(
+		context.Background(), 5*time.Second,
+	)
+	defer cancel()
+
+	// Create a temporary SQLite database.
+	path := filepath.Join(t.TempDir(), "matches.sqlite")
+
+	store, err := persistence.Open(path)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer store.Close()
+
+	// Create a game that finishes after two actions.
+	g := &StubGame.StubGame{EndAfter: 2}
+
+	s := NewSession("persist-session", "StubGame", g, true, store)
+	go s.Run(ctx)
+
+	alice := newFakeSender()
+	bob := newFakeSender()
+
+	// Join two players.
+	if err := s.Join(ctx, "alice", "Alice", 1, alice); err != nil {
+		t.Fatalf("Alice join: %v", err)
+	}
+
+	if err := s.Join(ctx, "bob", "Bob", 1, bob); err != nil {
+		t.Fatalf("Bob join: %v", err)
+	}
+
+	// Start the match.
+	s.SetReady(ctx, "alice", true, 2)
+	s.SetReady(ctx, "bob", true, 2)
+
+	// Wait until the session processes the ready messages.
+	if moves := s.LegalMoves(ctx, "alice"); len(moves) == 0 {
+		t.Fatal("expected match to start")
+	}
+
+	// Submit one rejected action followed by two accepted actions.
+	// Bob attempts to act when it is Alice's turn.
+	s.Submit(ctx, game.Action{
+		ID:      3,
+		ActorID: "bob",
+		Payload: []byte("NoOp"),
+	})
+
+	// Ensure the rejection has been processed.
+	s.LegalMoves(ctx, "alice")
+
+	// Submit two valid actions to finish the match.
+	s.Submit(ctx, game.Action{
+		ID:      4,
+		ActorID: "alice",
+		Payload: []byte("NoOp"),
+	})
+
+	s.Submit(ctx, game.Action{
+		ID:      5,
+		ActorID: "bob",
+		Payload: []byte("NoOp"),
+	})
+
+	// Wait until both actions and the database save finish.
+	s.LegalMoves(ctx, "alice")
+
+	// This is the first match in a fresh database.
+	saved, err := store.GetMatch(ctx, 1)
+	if err != nil {
+		t.Fatalf("retrieve completed match: %v", err)
+	}
+
+	// Verify match metadata.
+	if saved.SessionID != "persist-session" {
+		t.Errorf("unexpected session ID: %s", saved.SessionID)
+	}
+
+	if saved.MatchNumber != 1 {
+		t.Errorf("expected match number 1, got %d", saved.MatchNumber)
+	}
+
+	if saved.GameID != "StubGame" {
+		t.Errorf("unexpected game ID: %s", saved.GameID)
+	}
+
+	if !saved.IsDraw {
+		t.Error("expected a draw")
+	}
+
+	// Verify participants.
+	if len(saved.Participants) != 2 {
+		t.Fatalf(
+			"expected 2 participants, got %d",
+			len(saved.Participants),
+		)
+	}
+
+	// Verify the saved per-player action statistics.
+	for _, participant := range saved.Participants {
+		switch participant.ClientID {
+		case "alice":
+			if participant.ActionsAccepted != 1 || participant.ActionsRejected != 0 {
+				t.Errorf("Alice: expected 1 accepted and 0 rejected actions, got %d and %d",
+					participant.ActionsAccepted, participant.ActionsRejected)
+			}
+		case "bob":
+			if participant.ActionsAccepted != 1 || participant.ActionsRejected != 1 {
+				t.Errorf("Bob: expected 1 accepted and 1 rejected action, got %d and %d",
+					participant.ActionsAccepted, participant.ActionsRejected)
+			}
+		default:
+			t.Errorf("unexpected participant: %s", participant.ClientID)
+		}
+	}
+
+	// Verify the complete action history.
+	if len(saved.Actions) != 3 {
+		t.Fatalf("expected 3 actions, got %d", len(saved.Actions))
+	}
+
+	expectedActors := []string{"bob", "alice", "bob"}
+	expectedOutcomes := []string{
+		persistence.ActionRejected,
+		persistence.ActionAccepted,
+		persistence.ActionAccepted,
+	}
+
+	for i, action := range saved.Actions {
+		if action.Seq != int64(i+1) {
+			t.Errorf("action %d: incorrect sequence", i)
+		}
+
+		if action.ClientID != expectedActors[i] {
+			t.Errorf("action %d: incorrect actor", i)
+		}
+
+		if action.Outcome != expectedOutcomes[i] {
+			t.Errorf("action %d: incorrect outcome", i)
+		}
+
+		if string(action.Payload) != "NoOp" {
+			t.Errorf("action %d: incorrect payload", i)
+		}
+	}
+
+	if saved.Actions[0].RejectionCode == "" {
+		t.Error("rejected action missing rejection code")
+	}
+
+	// Stop the session and close the database.
+	cancel()
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+
+	// Reopen the same SQLite file.
+	reopened, err := persistence.Open(path)
+	if err != nil {
+		t.Fatalf("reopen database: %v", err)
+	}
+	defer reopened.Close()
+
+	// Retrieve the match after reopening.
+	restored, err := reopened.GetMatch(
+		context.Background(), saved.ID,
+	)
+	if err != nil {
+		t.Fatalf("retrieve match after reopen: %v", err)
+	}
+
+	if !reflect.DeepEqual(saved, restored) {
+		t.Errorf(
+			"match changed after reopening database\nwant: %+v\ngot:  %+v",
+			saved,
+			restored,
+		)
 	}
 }
