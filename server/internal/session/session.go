@@ -505,7 +505,7 @@ func (s *Session) viewFor(memberID string) transport.StateUpdate {
 		Status:        transport.StatusWaiting,
 		Players:       s.players(),
 		OwnerPlayerID: s.Owner(),
-		StateVersion: s.stateVersion,
+		StateVersion:  s.stateVersion,
 	}
 	if s.current != nil {
 		view.Status = transport.StatusInProgress
