@@ -590,7 +590,13 @@ func TestMatchResultCarriesReasonAndTurnsAndIsKeptInHistory(t *testing.T) {
 	}
 
 	for i, actor := range []string{"a", "b", "a", "b"} { // the stub ends after four actions
-		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: actor, Payload: []byte("NoOp")})
+		var sender Sender
+		if actor == "a" {
+			sender = a
+		} else {
+			sender = b
+		}
+		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: actor, Payload: []byte("NoOp")}, s.ID, uint64(5+i), sender)
 		a.next(t)
 		b.next(t)
 	}

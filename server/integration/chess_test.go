@@ -139,10 +139,10 @@ func TestCheckmateEndsTheSessionMatch(t *testing.T) {
 }
 
 func TestResigningOutOfTurnEndsTheMatch(t *testing.T) {
-	s, ctx, white, black, _ := startChessMatch(t)
+	s, ctx, white, black, started := startChessMatch(t)
 
 	// It is white's turn, and black resigns anyway
-	s.Submit(ctx, game.Action{ID: 5, ActorID: "black", Payload: []byte("resign")})
+	s.Submit(ctx, game.Action{ID: 5, ActorID: "black", Payload: []byte("resign")}, s.ID, started[0].GetStateVersion(), white)
 	for _, r := range []*recorder{white, black} {
 		if got := r.next(t); got.GetStateUpdate() == nil {
 			t.Fatalf("expected a StateUpdate for the resignation, got %v", got)
@@ -168,7 +168,13 @@ func TestStateUpdatesCarryCheckAnnotations(t *testing.T) {
 	moves := []struct{ actor, uci string }{{"white", "e2e4"}, {"black", "f7f5"}, {"white", "d1h5"}}
 	var last *pb.StateUpdate
 	for i, m := range moves {
-		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: m.actor, Payload: []byte(m.uci)})
+		var sender session.Sender
+		if m.actor == "white" {
+			sender = white
+		} else {
+			sender = black
+		}
+		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: m.actor, Payload: []byte(m.uci)}, s.ID, last.GetStateVersion(), sender)
 		for _, r := range []*recorder{white, black} {
 			last = r.next(t).GetStateUpdate()
 		}

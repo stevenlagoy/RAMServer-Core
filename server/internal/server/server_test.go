@@ -573,6 +573,9 @@ func TestStubMatchOverProtocol(t *testing.T) {
 		}
 	}
 
+	expectState(t, alice, aliceR, 0, pb.SessionStatus_SESSION_STATUS_WAITING)
+	expectState(t, bob, bobR, 0, pb.SessionStatus_SESSION_STATUS_WAITING)
+
 	// The finished match is in the session's history
 	sendMessage(t, alice, matchHistoryRequest(30, sessionID))
 	history := expectMessage(t, alice, aliceR)

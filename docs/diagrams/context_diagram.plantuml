@@ -16,7 +16,7 @@ package "Runtime Environment (Docker container or native process)" {
 cloud "GitHub\n(Actions, Projects)" as GH
 cloud "Cloud host\n(stretch goal)" as Cloud
 
-Players -- Core : Protobuf over TCP\n(:9000)
+Players -- Core : Protobuf over TCP\n(:8080)
 Reviewer -- Core : match retrieval request
 Operator --> Core : env vars, shutdown signal
 Core --> Operator : structured logs (stdout)

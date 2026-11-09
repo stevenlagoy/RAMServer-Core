@@ -22,7 +22,7 @@ The client connects, completes the handshake, then reads one command per line. M
 Example:
 
 ```text
-Connected to 127.0.0.1:9000
+Connected to 127.0.0.1:8080
 [2026-10-11 00:32:22] -> CONNECT   sequence:1 connect_request:{protocol_version:"1.1" client_name:"leanclient"}
 [2026-10-11 00:32:22] <- CONNECTED in_reply_to:1 connect_response:{connection_id:"127.0.0.1:34686" server_protocol_version:"1.1"}
 [2026-10-11 00:32:22] -> AUTH      sequence:2 auth_request:{display_name:"Alice"}
@@ -77,7 +77,7 @@ go run ./cmd/leanclient -version 2.0
 
 ```text
 -addr string
-      server address (default: RAMSERVER_ADDR, otherwise 127.0.0.1:9000)
+      server address (default: RAMSERVER_ADDR, otherwise 127.0.0.1:8080)
 -handshake
       send ConnectRequest and AuthRequest automatically on connect (default true)
 -name string
@@ -97,5 +97,5 @@ go run ./cmd/leanclient -h
 When the server is running through the repository's Docker Compose setup, connect to its published port with:
 
 ```bash
-go run ./cmd/leanclient -addr 127.0.0.1:9000
+go run ./cmd/leanclient -addr 127.0.0.1:8080
 ```
