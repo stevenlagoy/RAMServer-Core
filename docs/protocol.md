@@ -1,6 +1,6 @@
 # RAMServer Wire Protocol - v1
 
-Protocol Version: 1.2
+Protocol Version: 1.3
 
 Schema file: [`proto/ramserver/v1/ramserver.proto`](../proto/ramserver/v1/ramserver.proto) (package `ramserver.v1`, `proto3` syntax)
 

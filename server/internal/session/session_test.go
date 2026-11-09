@@ -634,3 +634,93 @@ func TestStateUpdatesCarryGameAnnotations(t *testing.T) {
 		t.Fatalf("expected an in-progress update annotated for a, got %v", started)
 	}
 }
+
+func TestGenerateJoinToken(t *testing.T) {
+	s, ctx := startSession(t, &StubGame.StubGame{})
+	owner, ownerSender := "owner", newFakeSender()
+	member, memberSender := "member", newFakeSender()
+
+	if err := s.Join(ctx, owner, "Alice", 1, ownerSender); err != nil {
+		t.Fatal(err)
+	}
+	ownerSender.next(t)
+
+	if err := s.Join(ctx, member, "Bob", 1, memberSender); err != nil {
+		t.Fatal(err)
+	}
+	ownerSender.next(t)
+	memberSender.next(t)
+
+	if err := s.GenerateJoinToken(ctx, owner, 7); err != nil {
+		t.Fatalf("GenerateJoinToken() error = %v", err)
+	}
+
+	ownerUpdate := ownerSender.next(t)
+	memberUpdate := memberSender.next(t)
+
+	if ownerUpdate.GetInReplyTo() != 7 {
+		t.Fatalf("owner in_reply_to = %d, want 7", ownerUpdate.GetInReplyTo())
+	}
+	if memberUpdate.GetInReplyTo() != 0 {
+		t.Fatalf("member in_reply_to = %d, want 0", memberUpdate.GetInReplyTo())
+	}
+
+	ownerState := ownerUpdate.GetStateUpdate()
+	memberState := memberUpdate.GetStateUpdate()
+	if ownerState == nil || memberState == nil {
+		t.Fatalf("expected StateUpdate broadcasts, got owner=%v member=%v",
+			ownerUpdate, memberUpdate)
+	}
+
+	token := ownerState.GetSessionJoinToken()
+	if token == "" {
+		t.Fatal("generated join token is empty")
+	}
+	if memberState.GetSessionJoinToken() != token {
+		t.Fatalf("member received token %q, want %q",
+			memberState.GetSessionJoinToken(), token)
+	}
+}
+
+func TestGenerateJoinTokenRequiresOwner(t *testing.T) {
+	s, ctx := startSession(t, &StubGame.StubGame{})
+	ownerSender, memberSender := newFakeSender(), newFakeSender()
+
+	if err := s.Join(ctx, "owner", "Alice", 1, ownerSender); err != nil {
+		t.Fatal(err)
+	}
+	ownerSender.next(t)
+
+	if err := s.Join(ctx, "member", "Bob", 1, memberSender); err != nil {
+		t.Fatal(err)
+	}
+	ownerSender.next(t)
+	memberSender.next(t)
+
+	err := s.GenerateJoinToken(ctx, "member", 7)
+	var protocolErr *transport.ProtocolError
+	if !errors.As(err, &protocolErr) ||
+		protocolErr.Code != transport.CodeIllegalAction {
+		t.Fatalf("error = %v, want CodeIllegalAction", err)
+	}
+
+	// A rejected request must not broadcast a state update.
+	select {
+	case msg := <-ownerSender.frames:
+		t.Fatalf("owner unexpectedly received a message: %v", msg)
+	default:
+	}
+	select {
+	case msg := <-memberSender.frames:
+		t.Fatalf("member unexpectedly received a message: %v", msg)
+	default:
+	}
+}
+
+func TestGenerateJoinTokenRequiresMembership(t *testing.T) {
+	s, ctx := startSession(t, &StubGame.StubGame{})
+
+	if err := s.GenerateJoinToken(ctx, "outsider", 7); err == nil {
+		t.Fatal("expected an error for a non-member")
+	}
+}

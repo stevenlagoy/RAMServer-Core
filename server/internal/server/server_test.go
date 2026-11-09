@@ -269,6 +269,17 @@ func leaveRequest(seq uint64, sessionID string) *pb.ClientMessage {
 	}
 }
 
+func generateJoinTokenRequest(seq uint64, sessionID string) *pb.ClientMessage {
+	return &pb.ClientMessage{
+		Sequence: seq,
+		Payload: &pb.ClientMessage_GenerateJoinTokenRequest{
+			GenerateJoinTokenRequest: &pb.GenerateJoinTokenRequest{
+				SessionId: sessionID,
+			},
+		},
+	}
+}
+
 // createSession sends a JoinSessionRequest with no session_id and returns the new session's id
 func createSession(t *testing.T, conn net.Conn, r *bufio.Reader, seq uint64) string {
 	t.Helper()
@@ -903,4 +914,65 @@ func TestEmptySessionIsRemoved(t *testing.T) {
 	if players := state.GetPlayers(); len(players) != 1 || players[0].GetPlayerId() != bobID {
 		t.Fatalf("expected Bob alone in a new session, got %v", players)
 	}
+}
+
+func TestGenerateJoinTokenOverProtocol(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+
+	alice, aliceR, _ := authenticate(t, addr, "Alice")
+	bob, bobR, _ := authenticate(t, addr, "Bob")
+
+	sessionID := createSession(t, alice, aliceR, 3)
+
+	sendMessage(t, bob, joinRequest(3, "stub", sessionID))
+	expectState(t, bob, bobR, 3, pb.SessionStatus_SESSION_STATUS_WAITING)
+	expectState(t, alice, aliceR, 0, pb.SessionStatus_SESSION_STATUS_WAITING)
+
+	sendMessage(t, alice, generateJoinTokenRequest(4, sessionID))
+
+	aliceState := expectState(
+		t, alice, aliceR, 4, pb.SessionStatus_SESSION_STATUS_WAITING,
+	)
+	bobState := expectState(
+		t, bob, bobR, 0, pb.SessionStatus_SESSION_STATUS_WAITING,
+	)
+
+	token := aliceState.GetSessionJoinToken()
+	if token == "" {
+		t.Fatal("expected a generated join token")
+	}
+	if bobState.GetSessionJoinToken() != token {
+		t.Fatalf("Bob received token %q, want %q",
+			bobState.GetSessionJoinToken(), token)
+	}
+}
+
+func TestGenerateJoinTokenRequiresOwnerOverProtocol(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+
+	alice, aliceR, _ := authenticate(t, addr, "Alice")
+	bob, bobR, _ := authenticate(t, addr, "Bob")
+
+	sessionID := createSession(t, alice, aliceR, 3)
+
+	sendMessage(t, bob, joinRequest(3, "stub", sessionID))
+	expectState(t, bob, bobR, 3, pb.SessionStatus_SESSION_STATUS_WAITING)
+	expectState(t, alice, aliceR, 0, pb.SessionStatus_SESSION_STATUS_WAITING)
+
+	sendMessage(t, bob, generateJoinTokenRequest(4, sessionID))
+	expectError(t, bob, bobR, 4, pb.ErrorCode_ERROR_CODE_ILLEGAL_ACTION)
+
+	expectNoMessage(t, alice, aliceR)
+}
+
+func TestGenerateJoinTokenRequiresSessionOverProtocol(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+
+	alice, aliceR, _ := authenticate(t, addr, "Alice")
+
+	sendMessage(t, alice, generateJoinTokenRequest(3, "session-missing"))
+	expectError(t, alice, aliceR, 3, pb.ErrorCode_ERROR_CODE_NOT_IN_SESSION)
 }

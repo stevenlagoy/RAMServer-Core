@@ -14,7 +14,7 @@ import (
 )
 
 // Schema version this server implements, as "<major>.<minor>"
-const ProtocolVersion = "1.2"
+const ProtocolVersion = "1.3"
 
 // Reports whether a client built against clientVersion may connect
 func CompatibleVersion(clientVersion string) bool {
