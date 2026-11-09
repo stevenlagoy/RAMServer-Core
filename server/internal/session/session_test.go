@@ -583,16 +583,18 @@ func TestFullSessionIsNotJoinableInInfo(t *testing.T) {
 
 func TestMatchResultCarriesReasonAndTurnsAndIsKeptInHistory(t *testing.T) {
 	s, ctx := startSession(t, &reasonGame{})
-	senders, _ := startMatch(t, s, ctx, "a", "b")
+	senders, started := startMatch(t, s, ctx, "a", "b")
 	a, b := senders["a"], senders["b"]
+	stateVersion := started["a"].GetStateVersion()
 	if history := s.History(ctx); len(history) != 0 {
 		t.Fatalf("history before any match ended = %v, want empty", history)
 	}
 
 	for i, actor := range []string{"a", "b", "a", "b"} { // the stub ends after four actions
-		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: actor, Payload: []byte("NoOp")})
+		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: actor, Payload: []byte("NoOp")}, s.ID, stateVersion, senders[actor])
 		a.next(t)
 		b.next(t)
+		stateVersion++
 	}
 	for name, f := range map[string]*fakeSender{"a": a, "b": b} {
 		result := f.next(t).GetMatchResult()

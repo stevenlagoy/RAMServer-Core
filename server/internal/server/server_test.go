@@ -572,6 +572,9 @@ func TestStubMatchOverProtocol(t *testing.T) {
 			t.Fatalf("%s: expected an unsolicited drawn MatchResult, got %v", name, resp)
 		}
 	}
+	for _, p := range players {
+		expectState(t, p.conn, p.r, 0, pb.SessionStatus_SESSION_STATUS_WAITING)
+	}
 
 	// The finished match is in the session's history
 	sendMessage(t, alice, matchHistoryRequest(30, sessionID))
