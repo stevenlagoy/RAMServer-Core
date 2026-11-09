@@ -1,0 +1,60 @@
+@startuml 08_seq_submit_action
+title Sequence: Submit an Action, Rejection Paths, and Match End (UC-3, UC-4, UC-6)
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign left
+skinparam maxMessageSize 260
+
+actor "Client A\n(player to move)" as A
+actor "Client B\n(opponent)" as B
+participant "server.Client (A)" as CA
+participant "Session\n(actor)" as S
+participant "Match" as M
+participant "chess.Game" as G
+participant "store" as DB <<planned>>
+
+A -> CA : ActionRequest(seq n, session_id, encoded_action "e2e4", expected_state_version)
+CA -> CA : DecodeClientMessage, require authenticated
+alt malformed envelope
+  CA --> A : ErrorResponse(MALFORMED_MESSAGE, in_reply_to 0 or n)
+else session_id is not the connection's session
+  CA --> A : ErrorResponse(NOT_IN_SESSION, in_reply_to n)
+end
+CA -> CA : action.ActorID = this connection's player_id\n(any identity claimed by the client is ignored)
+CA -> S : Submit(action)
+S -> S : member lookup, require a running match
+S -> M : ApplyAction(action)
+M -> G : ActiveTurn(state)
+alt actor is not the active player
+  M --> S : ErrNotYourTurn
+  S --> A : ErrorResponse(OUT_OF_TURN, in_reply_to n)
+else actor is active
+  M -> G : Validate(state, action)
+  alt payload cannot be decoded or move is illegal
+    G --> M : ErrMalformedAction or ErrIllegalAction
+    M --> S : error
+    S --> A : ErrorResponse(ILLEGAL_ACTION or MALFORMED_MESSAGE, in_reply_to n)
+    note over S #FFF3CD
+      State is unchanged and nothing is broadcast.
+      PLANNED (FR-2, FR-26): write a structured log entry for the rejection.
+    end note
+  else legal
+    M -> G : Apply(state, action)
+    G --> M : new immutable state
+    M --> S : nil (Turns incremented)
+    S --> A : StateUpdate(in_reply_to n, view for A, active_player_id = B)
+    S --> B : StateUpdate(in_reply_to 0, view for B, active_player_id = B)
+    S -> M : Outcome()
+    M -> G : Outcome(state)
+    opt terminal state (checkmate, draw, and so on)
+      G --> M : MatchResult, true
+      S -> S : history append, clear every Ready flag, current = nil
+      S --> A : MatchResult(winners, draw, reason COMPLETED)
+      S --> B : MatchResult(winners, draw, reason COMPLETED)
+      S -> DB : SaveMatch(session, match, seed, participants, ordered action log, result)
+      note right of DB : PLANNED (FR-6, NFR-6): one transaction, all or nothing.\nA failed write is logged, retried, and flagged unpersisted.
+      note over S : Session returns to WAITING. A rematch needs a new SetReadyRequest from each player.
+    end
+  end
+end
+@enduml

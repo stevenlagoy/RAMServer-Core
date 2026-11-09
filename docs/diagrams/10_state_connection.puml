@@ -1,0 +1,47 @@
+@startuml 10_state_connection
+title State Model: Connection Lifecycle (FR-12, UC-1, UC-5)
+skinparam shadowing false
+hide empty description
+skinparam state<<planned>> {
+  BackgroundColor #EEEEEE
+  BorderColor #888888
+  FontColor #666666
+}
+
+[*] --> TcpOpen : accepted (IP limit and semaphore passed)
+TcpOpen --> Connected : ConnectRequest\n[major version matches]\n/ ConnectResponse
+TcpOpen --> Closed : ConnectRequest [major differs]\n/ ErrorResponse(INVALID_PROTOCOL_VERSION)
+TcpOpen --> Closed : no frame within FirstMessageTimeout (5 s)
+Connected --> Connected : AuthRequest [empty display_name]\n/ ErrorResponse(INVALID_ARGUMENT)
+Connected --> Authenticated : AuthRequest [valid]\n/ AuthResponse
+
+state Authenticated {
+  [*] --> NoSession
+  NoSession --> InSession : JoinSessionRequest [joinable]\n/ StateUpdate
+  NoSession --> NoSession : JoinSessionRequest [unknown game, bad id, full]\n/ ErrorResponse
+  InSession --> NoSession : LeaveSessionRequest\n/ LeaveSessionResponse
+  state InSession {
+    [*] --> InLobby
+    InLobby --> InMatch : Game.ReadyToStart is true\n/ StateUpdate(IN_PROGRESS)
+    InMatch --> InLobby : terminal outcome\n/ MatchResult
+    InMatch --> InMatch : ActionRequest\n/ StateUpdate or ErrorResponse
+  }
+}
+
+state "Disconnected\n(grace period)" as Disconnected <<planned>>
+Authenticated --> Disconnected : socket lost [in a session]
+Disconnected --> Authenticated : AuthRequest(player_id, token) matches
+Disconnected --> Closed : grace period expires
+
+TcpOpen --> Closed : read error, EOF
+Connected --> Closed : read timeout, EOF
+Authenticated --> Closed : read timeout (ReadTimeout), EOF,\nwrite error, or out queue full (slow client)
+Closed --> [*]
+
+note bottom of Connected
+  In every state a message that is not valid there
+  (for example JoinSessionRequest before AuthResponse,
+  or a second ConnectRequest) gets ErrorResponse(INVALID_STATE)
+  and the state does not change.
+end note
+@enduml

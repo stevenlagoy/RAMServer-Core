@@ -1,0 +1,43 @@
+@startuml 03_data_flow
+title Data Flow: One Client Action from TCP Bytes to Broadcast
+
+skinparam shadowing false
+skinparam rectangle<<planned>> {
+  BackgroundColor #EEEEEE
+  BorderColor #888888
+  FontColor #666666
+}
+
+rectangle "Client socket" as Sock
+rectangle "1. ReadFrame\nlength prefix, size cap, heartbeats dropped\n(transport/framing)" as R1
+rectangle "2. DecodeClientMessage\nproto.Unmarshal into ClientMessage\n(transport/codec)" as R2
+rectangle "3. State gate\nhandshake or dispatch by connection state\n(server/Client)" as R3
+rectangle "4. Identity binding\nActorID = connection's player_id\nmembership check" as R4
+rectangle "5. Session inbox\nserialized by the Session actor" as R5
+rectangle "6. Match.ApplyAction\nActiveTurn, Validate, Apply\n(game plugin)" as R6
+rectangle "7. Outcome check\nGame.Outcome(state)" as R7
+rectangle "8. Per-recipient view\nGame.ViewFor(state, member)\nEncodeStateUpdate / EncodeMatchResult" as R8
+rectangle "9. Client.out queue\nnon-blocking Send" as R9
+rectangle "10. writeLoop\nWriteFrame with write deadline" as R10
+rectangle "Client sockets\n(every session member)" as Out
+rectangle "Action log and result write\n(single transaction)" as R11 <<planned>>
+rectangle "Structured log\n(accepted and rejected actions)" as R12 <<planned>>
+database "Authoritative GameState\n(held only by Match)" as GS
+
+Sock --> R1 : bytes
+R1 --> R2 : payload []byte
+R2 --> R3 : ClientMessage
+R3 --> R4 : ActionRequest
+R4 --> R5 : game.Action
+R5 --> R6 : game.Action
+R6 <--> GS : read, replace with new state
+R6 --> R7 : accepted
+R6 --> R9 : ErrorResponse to sender only\n(rejected, state unchanged)
+R7 --> R8 : state, terminal flag
+R8 --> R9 : encoded frame per member
+R9 --> R10 : []byte
+R10 --> Out : frames
+R7 ..> R11 : terminal match
+R6 ..> R12 : every action
+R3 --> R9 : handshake and state errors
+@enduml
