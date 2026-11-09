@@ -1,9 +1,10 @@
 version: v2
+
+inputs:
+  - git_repo: https://github.com/stevenlagoy/RAMServer-Core.git
+    branch: feature/58-69-private-sessions
+    subdir: proto
+
 plugins:
-  - remote: buf.build/protocolbuffers/go
-    out: server/gen
-    opt: paths=source_relative
-  - remote: buf.build/protocolbuffers/java
-    out: clients/chess/compiled_client/gen
   - remote: buf.build/protocolbuffers/python
-    out: clients/chess/interpreted_client/gen
+    out: clients/pychess/gen
