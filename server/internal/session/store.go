@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
@@ -54,7 +55,7 @@ func (st *SessionStore) Get(id string) (*Session, bool) {
 	// Find by Join Token
 	if !ok {
 		for _, s := range st.sessions {
-			if s.session.joinTokenValue() == id {
+			if strings.EqualFold(s.session.joinTokenValue(), id) {
 				stored, ok = s, true
 			}
 		}

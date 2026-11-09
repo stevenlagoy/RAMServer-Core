@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 )
 
 // waitStopped fails unless s's Run goroutine exits within a second
@@ -204,4 +206,119 @@ func TestSessionStoreConcurrency(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func TestJoinWithCaseInsensitiveToken(t *testing.T) {
+	tests := []struct {
+		name      string
+		transform func(string) string
+	}{
+		{
+			name:      "exact case",
+			transform: func(token string) string { return token },
+		},
+		{
+			name:      "lowercase",
+			transform: strings.ToLower,
+		},
+		{
+			name:      "uppercase",
+			transform: strings.ToUpper,
+		},
+		{
+			name: "mixed case",
+			transform: func(token string) string {
+				var result strings.Builder
+				for i, r := range token {
+					if i%2 == 0 {
+						result.WriteString(strings.ToLower(string(r)))
+					} else {
+						result.WriteString(strings.ToUpper(string(r)))
+					}
+				}
+				return result.String()
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st := NewSessionStore(t.Context())
+
+			s, err := st.Create(
+				"sess-1",
+				"stub",
+				&StubGame.StubGame{},
+				true,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				st.Remove("sess-1")
+				waitStopped(t, s)
+			})
+
+			token := s.joinTokenValue()
+			if token == "" {
+				t.Fatal("expected session to have a join token")
+			}
+
+			suppliedToken := tt.transform(token)
+
+			fetched, ok := st.Get(suppliedToken)
+			if !ok {
+				t.Fatalf("failed to find session using token %q", suppliedToken)
+			}
+			if fetched != s {
+				t.Fatal("token lookup returned the wrong session")
+			}
+
+			sender := newFakeSender()
+			if err := fetched.Join(
+				t.Context(),
+				"client-1",
+				"Alice",
+				1,
+				sender,
+			); err != nil {
+				t.Fatalf("failed to join session using token %q: %v", suppliedToken, err)
+			}
+
+			if update := sender.next(t).GetStateUpdate(); update == nil {
+				t.Fatal("expected a state update after joining")
+			}
+		})
+	}
+}
+
+func TestJoinWithInvalidToken(t *testing.T) {
+	st := NewSessionStore(t.Context())
+
+	s, err := st.Create("sess-1", "stub", &StubGame.StubGame{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		st.Remove("sess-1")
+		waitStopped(t, s)
+	})
+
+	token := s.joinTokenValue()
+
+	tests := []struct {
+		name  string
+		token string
+	}{
+		{name: "incorrect token", token: token + "X"},
+		{name: "empty token", token: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, ok := st.Get(tt.token); ok {
+				t.Fatalf("unexpectedly found session using invalid token %q", tt.token)
+			}
+		})
+	}
 }
