@@ -82,6 +82,7 @@ func NewSession(id, gameName string, g game.Game, public bool) *Session {
 		Game:         g,
 		Public:       public,
 		inbox:        make(chan sessionMsg),
+		stopped:      make(chan struct{}),
 		members:      make(map[string]*Member),
 		stateVersion: 1,
 	}
