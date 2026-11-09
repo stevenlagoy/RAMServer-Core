@@ -2,14 +2,62 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"sync"
 	"testing"
+	"time"
 )
 
+// waitStopped fails unless s's Run goroutine exits within a second
+func waitStopped(t *testing.T, s *Session) {
+	t.Helper()
+	select {
+	case <-s.stopped:
+	case <-time.After(time.Second):
+		t.Fatal("the session's goroutine did not exit")
+	}
+}
+
+func TestLastLeaveRemovesAndStopsSession(t *testing.T) {
+	st := NewSessionStore(t.Context())
+	s, err := st.Create("sess-1", "stub", &StubGame.StubGame{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := newFakeSender()
+	if err := s.Join(t.Context(), "a", "Alice", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	a.next(t)
+
+	s.Leave(t.Context(), "a")
+	waitStopped(t, s)
+	if _, ok := st.Get("sess-1"); ok {
+		t.Fatal("the empty session is still in the store")
+	}
+
+	// A caller still holding the session, such as matchmaking, gets an error instead of waiting forever
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := s.Join(ctx, "b", "Bob", 2, newFakeSender()); !errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("join on a stopped session: err = %v, want ErrSessionClosed", err)
+	}
+}
+
+func TestRemoveStopsSession(t *testing.T) {
+	st := NewSessionStore(t.Context())
+	s, err := st.Create("sess-1", "stub", &StubGame.StubGame{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Remove("sess-1")
+	waitStopped(t, s)
+}
+
 func TestNewStore(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(t.Context())
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
@@ -21,16 +69,13 @@ func TestNewStore(t *testing.T) {
 }
 
 func TestCreateAndGet(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(t.Context())
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	g := &StubGame.StubGame{}
-	s, err := st.Create(ctx, "sess-1", "chess", g, true)
+	s, err := st.Create("sess-1", "chess", g, true)
 	if err != nil {
 		t.Fatalf("err creating session: %v", err)
 	}
@@ -51,39 +96,33 @@ func TestCreateAndGet(t *testing.T) {
 }
 
 func TestCreateDuplicateID(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(t.Context())
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	g := &StubGame.StubGame{}
-	_, err := st.Create(ctx, "sess-1", "chess", g, true)
+	_, err := st.Create("sess-1", "chess", g, true)
 	if err != nil {
 		t.Fatalf("err creating session: %v", err)
 	}
 
-	_, err = st.Create(ctx, "sess-1", "checkers", g, true)
+	_, err = st.Create("sess-1", "checkers", g, true)
 	if err == nil {
 		t.Fatal("expected error when creating duplicate session")
 	}
 }
 
 func TestList(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(t.Context())
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	g := &StubGame.StubGame{}
-	st.Create(ctx, "sess-1", "chess", g, true)
-	st.Create(ctx, "sess-2", "chess", g, false)
-	st.Create(ctx, "sess-3", "checkers", g, true)
+	st.Create("sess-1", "chess", g, true)
+	st.Create("sess-2", "chess", g, false)
+	st.Create("sess-3", "checkers", g, true)
 
 	all := st.List("", false)
 	if len(all) != 3 {
@@ -107,16 +146,13 @@ func TestList(t *testing.T) {
 }
 
 func TestRemove(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(t.Context())
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	g := &StubGame.StubGame{}
-	st.Create(ctx, "sess-1", "chess", g, true)
+	st.Create("sess-1", "chess", g, true)
 
 	_, ok := st.Get("sess-1")
 	if !ok {
@@ -136,13 +172,10 @@ func TestRemove(t *testing.T) {
 }
 
 func TestSessionStoreConcurrency(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(t.Context())
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	var wg sync.WaitGroup
 	workers := 50
@@ -156,7 +189,7 @@ func TestSessionStoreConcurrency(t *testing.T) {
 				gameName = "checkers"
 			}
 
-			_, _ = st.Create(ctx, fmt.Sprintf("s-%d", id), gameName, &StubGame.StubGame{}, id%3 == 0)
+			_, _ = st.Create(fmt.Sprintf("s-%d", id), gameName, &StubGame.StubGame{}, id%3 == 0)
 		}(i)
 	}
 	wg.Wait()

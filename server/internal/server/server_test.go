@@ -850,3 +850,57 @@ func TestMatchHistoryRequiresMembershipAndStartsEmpty(t *testing.T) {
 	sendMessage(t, bob, matchHistoryRequest(3, sessionID)) // Bob is not a member
 	expectError(t, bob, bobR, 3, pb.ErrorCode_ERROR_CODE_NOT_IN_SESSION)
 }
+
+// A session keeps running after the player who created it disconnects: the others can still act, receive
+// the resulting broadcast, and leave. It used to stop with its creator's connection and block their requests
+func TestSessionOutlivesItsCreator(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, _ := authenticate(t, addr, "Alice")
+	bob, bobR, _ := authenticate(t, addr, "Bob")
+	sessionID := createSession(t, alice, aliceR, 3)
+	sendMessage(t, bob, joinRequest(3, "stub", sessionID))
+	expectState(t, bob, bobR, 3, pb.SessionStatus_SESSION_STATUS_WAITING)
+	expectState(t, alice, aliceR, 0, pb.SessionStatus_SESSION_STATUS_WAITING)
+	sendMessage(t, alice, readyRequest(4, sessionID, true))
+	expectState(t, alice, aliceR, 4, pb.SessionStatus_SESSION_STATUS_WAITING)
+	expectState(t, bob, bobR, 0, pb.SessionStatus_SESSION_STATUS_WAITING)
+	sendMessage(t, bob, readyRequest(4, sessionID, true))
+	expectState(t, bob, bobR, 4, pb.SessionStatus_SESSION_STATUS_IN_PROGRESS)
+	expectState(t, alice, aliceR, 0, pb.SessionStatus_SESSION_STATUS_IN_PROGRESS)
+	sendMessage(t, alice, actionRequest(5, sessionID, "NoOp")) // so it is Bob's turn
+	expectState(t, alice, aliceR, 5, pb.SessionStatus_SESSION_STATUS_IN_PROGRESS)
+	expectState(t, bob, bobR, 0, pb.SessionStatus_SESSION_STATUS_IN_PROGRESS)
+
+	alice.Close()
+	time.Sleep(100 * time.Millisecond) // let the server see the disconnect and cancel Alice's connection context
+
+	sendMessage(t, bob, actionRequest(5, sessionID, "NoOp"))
+	expectState(t, bob, bobR, 5, pb.SessionStatus_SESSION_STATUS_IN_PROGRESS)
+	sendMessage(t, bob, leaveRequest(6, sessionID))
+	if resp := expectMessage(t, bob, bobR); resp.GetLeaveSessionResponse() == nil || resp.GetInReplyTo() != 6 {
+		t.Fatalf("expected LeaveSessionResponse in reply to 6, got %v", resp)
+	}
+}
+
+// Once its last member leaves, a session is removed, so a join without session_id creates a new one
+func TestEmptySessionIsRemoved(t *testing.T) {
+	addr, stopServer := startTestServer(t, testConfig())
+	defer stopServer()
+	alice, aliceR, _ := authenticate(t, addr, "Alice")
+	bob, bobR, bobID := authenticate(t, addr, "Bob")
+	emptied := createSession(t, alice, aliceR, 3)
+	sendMessage(t, alice, leaveRequest(4, emptied))
+	if resp := expectMessage(t, alice, aliceR); resp.GetLeaveSessionResponse() == nil {
+		t.Fatalf("expected LeaveSessionResponse, got %v", resp)
+	}
+
+	sendMessage(t, bob, joinRequest(3, "stub", ""))
+	state := expectState(t, bob, bobR, 3, pb.SessionStatus_SESSION_STATUS_WAITING)
+	if state.GetSessionId() == emptied {
+		t.Fatalf("joined the emptied session %q instead of a new one", emptied)
+	}
+	if players := state.GetPlayers(); len(players) != 1 || players[0].GetPlayerId() != bobID {
+		t.Fatalf("expected Bob alone in a new session, got %v", players)
+	}
+}
