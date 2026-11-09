@@ -322,3 +322,55 @@ func TestJoinWithInvalidToken(t *testing.T) {
 		})
 	}
 }
+
+func TestOldJoinTokenBecomesInvalidAfterRegeneration(t *testing.T) {
+	st := NewSessionStore(t.Context())
+
+	s, err := st.Create("sess-1", "stub", &StubGame.StubGame{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		st.Remove("sess-1")
+		waitStopped(t, s)
+	})
+
+	oldToken := s.joinTokenValue()
+	if oldToken == "" {
+		t.Fatal("expected session to have an initial join token")
+	}
+
+	// The session creator must join before generating a replacement token.
+	sender := newFakeSender()
+	if err := s.Join(t.Context(), "owner", "Alice", 1, sender); err != nil {
+		t.Fatal(err)
+	}
+	sender.next(t)
+
+	if err := s.GenerateJoinToken(t.Context(), "owner", 2); err != nil {
+		t.Fatalf("failed to generate replacement token: %v", err)
+	}
+
+	// Consume the resulting state update.
+	sender.next(t)
+
+	newToken := s.joinTokenValue()
+	if newToken == "" {
+		t.Fatal("expected a replacement join token")
+	}
+	if newToken == oldToken {
+		t.Fatal("expected replacement token to differ from old token")
+	}
+
+	if _, ok := st.Get(oldToken); ok {
+		t.Fatal("old join token should no longer resolve to the session")
+	}
+
+	fetched, ok := st.Get(newToken)
+	if !ok {
+		t.Fatal("new join token should resolve to the session")
+	}
+	if fetched != s {
+		t.Fatal("new join token resolved to the wrong session")
+	}
+}
