@@ -1,0 +1,26 @@
+@startuml 11_state_session
+title State Model: Session and Match Lifecycle (FR-13, FR-33, FR-34, FR-35)
+skinparam shadowing false
+hide empty description
+skinparam state<<planned>> {
+  BackgroundColor #EEEEEE
+  BorderColor #888888
+  FontColor #666666
+}
+
+[*] --> Waiting : SessionStore.Create, then first Join
+
+state "Waiting\nSessionStatus WAITING\n(lobby between matches)" as Waiting
+state "InProgress\nSessionStatus IN_PROGRESS" as InProgress
+state "Closed\nSessionStatus CLOSED" as Closed <<planned>>
+
+Waiting --> Waiting : Join [role has room] / StateUpdate\nLeave / StateUpdate\nSetReady / StateUpdate
+Waiting --> InProgress : SetReady [Game.ReadyToStart is true]\n/ NewMatch, StateUpdate to every member
+InProgress --> InProgress : Join / ErrorResponse(SESSION_NOT_JOINABLE)\naccepted action / StateUpdate\nrejected action / ErrorResponse, no change
+InProgress --> Waiting : Game.Outcome is terminal\n/ MatchResult, history append, Ready flags cleared
+Waiting --> Closed : last member leaves or idle limit passes
+InProgress --> Closed : abort (server shutdown) or every player gone
+
+Closed --> [*]
+
+@enduml

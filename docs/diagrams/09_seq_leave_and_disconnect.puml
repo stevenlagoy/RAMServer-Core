@@ -1,0 +1,52 @@
+@startuml 09_seq_leave_and_disconnect
+title Sequence: Leave a Session and Dead-Connection Handling (UC-5, UC-10, UC-11)
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign left
+skinparam maxMessageSize 260
+
+actor "Client A" as A
+actor "Client B\n(remaining player)" as B
+participant "server.Client (A)" as CA
+participant "Session\n(actor)" as S
+participant "chess.Game" as G
+participant "store" as DB <<planned>>
+
+== Explicit leave (implemented) ==
+A -> CA : LeaveSessionRequest(seq n, session_id)
+alt connection has no session or the id differs
+  CA --> A : ErrorResponse(NOT_IN_SESSION)
+else member
+  CA -> S : Leave(clientID)
+  S -> S : remove Member and its join-order entry
+  S --> B : StateUpdate(roster without A, unsolicited)
+  CA --> A : LeaveSessionResponse(in_reply_to n, session_id)
+end
+note over S #FFF3CD
+  PLANNED (FR-20, FR-21, FR-34):
+  1. If a match is running, ask the game for its leave policy (forfeit, pause, fallback)
+     and send MatchResult(reason FORFEIT) when the match ends.
+  2. When the last member leaves, remove the session from SessionStore and stop its goroutine.
+end note
+
+== Dead connection (heartbeat detection is implemented; session cleanup is PLANNED) ==
+loop every PingInterval (10 s)
+  CA -> A : heartbeat (zero-length frame)
+  A --> CA : heartbeat reply (resets the server read deadline)
+end
+A -[#red]x CA : connection goes silent
+CA -> CA : read deadline expires (ReadTimeout), readLoop returns,\ncontext cancelled, socket closed
+CA -> S : PLANNED: Disconnect(clientID)
+S --> B : StateUpdate(A.connected = false)
+S -> S : start grace timer
+alt A resumes before the grace period ends (stretch goal, UC-11)
+  A -> CA : ConnectRequest, then AuthRequest(player_id, reconnect_token)
+  CA -> S : rebind sender to the new connection, close any older connection
+  S --> A : StateUpdate(in_reply_to 0, current view)
+  S --> B : StateUpdate(A.connected = true)
+else grace period expires
+  S -> G : disconnect policy (forfeit, pause, or fallback)
+  S --> B : StateUpdate and MatchResult(reason DISCONNECT)
+  S -> DB : SaveMatch(...)
+end
+@enduml

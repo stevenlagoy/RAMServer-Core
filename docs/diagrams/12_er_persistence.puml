@@ -1,0 +1,84 @@
+@startuml 12_er_persistence
+title Data Design: Persistence Schema (SQLite; FR-6, FR-26, FR-28, NFR-6, NFR-22, NFR-25)
+skinparam shadowing false
+hide circle
+skinparam linetype ortho
+
+entity "schema_migration" as schema_migration {
+  * version : INTEGER <<PK>>
+  --
+  * applied_at : TEXT
+}
+
+entity "client" as client {
+  * client_id : TEXT <<PK>>
+  --
+  * display_name : TEXT
+  * reconnect_token_hash : BLOB
+  * created_at : TEXT
+  last_seen_at : TEXT
+}
+
+entity "session" as session {
+  * session_id : TEXT <<PK>>
+  --
+  * game_id : TEXT
+  * created_at : TEXT
+  closed_at : TEXT
+}
+
+entity "match" as match {
+  * match_id : INTEGER <<PK>>
+  --
+  * session_id : TEXT <<FK>>
+  * match_number : INTEGER
+  * game_id : TEXT
+  * seed : BLOB
+  * started_at : TEXT
+  ended_at : TEXT
+  termination_reason : TEXT
+  is_draw : INTEGER
+  action_count : INTEGER
+}
+
+entity "match_participant" as match_participant {
+  * match_id : INTEGER <<PK, FK>>
+  * client_id : TEXT <<PK, FK>>
+  --
+  * role : TEXT
+  * seat : INTEGER
+  is_winner : INTEGER
+  score : REAL
+  actions_accepted : INTEGER
+  actions_rejected : INTEGER
+}
+
+entity "action_log" as action_log {
+  * match_id : INTEGER <<PK, FK>>
+  * seq : INTEGER <<PK>>
+  --
+  * client_id : TEXT <<FK>>
+  * received_at : TEXT
+  * payload : BLOB
+  * outcome : TEXT  (ACCEPTED or REJECTED)
+  rejection_code : TEXT
+  rejection_reason : TEXT
+  state_version : INTEGER
+}
+
+client ||--o{ match_participant : plays as
+match ||--|{ match_participant : has
+match ||--o{ action_log : records
+client ||--o{ action_log : submits
+session ||--o{ match : hosts
+
+note bottom of match
+  seed is empty for deterministic games such as chess.
+  Each match row and its action_log rows are written in one transaction (NFR-6).
+  Retention (NFR-25) deletes whole matches by ended_at.
+end note
+note right of client
+  Only gameplay data, client IDs, and display names are stored (NFR-22).
+  The token is stored as a hash, never in clear text.
+end note
+@enduml

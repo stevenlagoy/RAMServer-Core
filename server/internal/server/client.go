@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 	"runtime/debug"
@@ -131,6 +132,15 @@ func (c *Client) readLoop(ctx context.Context) {
 			continue
 		}
 		if !c.authenticated {
+			if msg.Kind == transport.KindAction {
+				slog.Warn("action rejected",
+					"session_id", msg.SessionID,
+					"connection_id", c.ID,
+					"sequence", msg.Sequence,
+					"error_code", transport.CodeInvalidState.String(),
+					"reason", "action before authentication",
+				)
+			}
 			c.handshake(msg)
 			continue
 		}
@@ -218,12 +228,24 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 		c.Send(transport.EncodeMatchHistoryResponse(msg.Sequence, msg.SessionID, c.session.History(ctx)))
 	case transport.KindAction:
 		if !c.inSession(msg) {
+			slog.Warn("action rejected",
+				"session_id", msg.SessionID,
+				"player_id", c.ID,
+				"sequence", msg.Sequence,
+				"error_code", transport.CodeNotInSession.String(),
+				"reason", "client not bound to requested session",
+			)
 			return
 		}
-		// TODO: enforce msg.ExpectedStateVersion once sessions track state_version
 		action := msg.Action
 		action.ActorID = c.ID // Don't trust IDs claimed by frame
-		c.session.Submit(ctx, action)
+		c.session.Submit(
+			ctx,
+			action,
+			msg.SessionID,
+			msg.ExpectedStateVersion,
+			c,
+		)
 	case transport.KindSetReady:
 		if !c.inSession(msg) {
 			return
@@ -235,7 +257,8 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 		}
 		c.Send(transport.EncodeLegalActionsResponse(msg.Sequence, c.ID, c.session.LegalMoves(ctx, c.ID)))
 	case transport.KindConnect, transport.KindAuth:
-		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeInvalidState, "already authenticated")))
+		c.Send(transport.EncodeError(msg.Sequence,
+			transport.NewError(transport.CodeInvalidState, "already authenticated")))
 	default:
 		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeMalformedMessage, "unknown message kind %v", msg.Kind)))
 	}
