@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
@@ -51,13 +52,26 @@ type Session struct {
 
 	// Below owned exclusively by Run goroutine
 
-	order   []string // join order, order[0] is current owner
-	members map[string]*Member
-	history []MatchResult
-	current *match.Match
-	emptied bool // the last member left, so Run returns instead of handling more messages
+	order        []string // join order, order[0] is current owner
+	members      map[string]*Member
+	history      []MatchResult
+	current      *match.Match
+	stateVersion uint64
+	emptied      bool // the last member left, so Run returns instead of handling more messages
 
-	joinToken string
+	joinToken atomic.Pointer[string]
+}
+
+func (s *Session) setJoinToken(token string) {
+	s.joinToken.Store(&token)
+}
+
+func (s *Session) joinTokenValue() string {
+	token := s.joinToken.Load()
+	if token == nil {
+		return ""
+	}
+	return *token
 }
 
 // Creates an empty Session; its creator joins through Join like any other member
@@ -74,7 +88,7 @@ func NewSession(id, gameName string, g game.Game, public bool) *Session {
 }
 
 // Returns current lobby owner
-func (s *Session) Owner() string {
+func (s *Session) owner() string {
 	if len(s.order) == 0 {
 		return ""
 	}
@@ -83,13 +97,14 @@ func (s *Session) Owner() string {
 
 // Envelopes request Run processes
 type sessionMsg struct {
-	join       *joinMsg
-	leave      *leaveMsg
-	setReady   *setReadyMsg
-	submit     *submitMsg
-	legalMoves *legalMovesMsg
-	info       *infoMsg
-	history    *historyMsg
+	join              *joinMsg
+	leave             *leaveMsg
+	setReady          *setReadyMsg
+	submit            *submitMsg
+	legalMoves        *legalMovesMsg
+	info              *infoMsg
+	history           *historyMsg
+	generateJoinToken *generateJoinTokenMsg
 }
 
 type submitMsg struct {
@@ -110,6 +125,11 @@ type infoMsg struct {
 }
 type historyMsg struct {
 	reply chan []transport.MatchResult
+}
+type generateJoinTokenMsg struct {
+	clientID string
+	seq      uint64
+	reply    chan error
 }
 type leaveMsg struct {
 	clientID string
@@ -140,6 +160,9 @@ var (
 	ErrStaleState = errors.New(
 		"action was submitted against an outdated state",
 	)
+
+	// Returned by Join when the Session has stopped, such as after its last member left
+	ErrSessionClosed = transport.WrapError(transport.CodeSessionNotJoinable, errors.New("session has closed"))
 )
 
 // Hands msg to Run. Returns false if ctx is cancelled or the Session stops first
@@ -253,16 +276,64 @@ func (s *Session) History(ctx context.Context) []transport.MatchResult {
 	return matches
 }
 
-func (s *Session) GenerateJoinToken() (string, error) {
+func (s *Session) GenerateJoinToken(ctx context.Context, clientID string, seq uint64) error {
+	reply := make(chan error, 1)
+
+	if !s.send(ctx, sessionMsg{
+		generateJoinToken: &generateJoinTokenMsg{
+			clientID: clientID,
+			seq:      seq,
+			reply:    reply,
+		},
+	}) {
+		return s.noReplyErr(ctx)
+	}
+
+	err, ok := await(ctx, s, reply)
+	if !ok {
+		return s.noReplyErr(ctx)
+	}
+	return err
+}
+
+func (s *Session) handleGenerateJoinToken(req *generateJoinTokenMsg) {
+	if _, ok := s.members[req.clientID]; !ok {
+		req.reply <- ErrNotInSession
+		return
+	}
+
+	if s.owner() != req.clientID {
+		req.reply <- transport.NewError(
+			transport.CodeIllegalAction,
+			"only the session owner may generate a join token",
+		)
+		return
+	}
+
+	token, err := generateJoinToken(s.ID)
+	if err != nil {
+		req.reply <- err
+		return
+	}
+
+	s.setJoinToken(token)
+	s.stateVersion++
+	s.broadcastState(req.clientID, req.seq)
+
+	req.reply <- nil
+}
+
+func generateJoinToken(sessionID string) (string, error) {
 	cryptoBuf := make([]byte, 8)
 	if _, err := rand.Read(cryptoBuf); err != nil {
 		return "", err
 	}
+
 	timeBuf := make([]byte, 8)
 	binary.BigEndian.PutUint64(timeBuf, uint64(time.Now().UnixNano()))
 
 	hasher := sha256.New()
-	hasher.Write([]byte(s.ID))
+	hasher.Write([]byte(sessionID))
 	hasher.Write(timeBuf)
 	hasher.Write(cryptoBuf)
 	hashBytes := hasher.Sum(nil)
@@ -282,7 +353,6 @@ func (s *Session) GenerateJoinToken() (string, error) {
 		idx := uint64(chunk) % possibilities
 		result.WriteRune(tokenRunes[idx])
 	}
-	s.joinToken = result.String()
 	return result.String(), nil
 }
 
@@ -324,6 +394,8 @@ func (s *Session) handle(msg sessionMsg) {
 		s.handleInfo(msg.info)
 	case msg.history != nil:
 		s.handleHistory(msg.history)
+	case msg.generateJoinToken != nil:
+		s.handleGenerateJoinToken(msg.generateJoinToken)
 	}
 }
 
@@ -525,7 +597,7 @@ func (s *Session) handleInfo(i *infoMsg) {
 		GameID:        s.GameName,
 		Status:        status,
 		Players:       s.players(),
-		OwnerPlayerID: s.Owner(),
+		OwnerPlayerID: s.owner(),
 		Joinable:      s.current == nil && s.assignRole() != "",
 	}
 }
@@ -564,8 +636,8 @@ func (s *Session) viewFor(memberID string) transport.StateUpdate {
 		Status:        transport.StatusWaiting,
 		Players:       s.players(),
 		StateVersion:  s.stateVersion,
-		OwnerPlayerID: s.Owner(),
-		JoinToken:     s.joinToken,
+		OwnerPlayerID: s.owner(),
+		JoinToken:     s.joinTokenValue(),
 	}
 	if s.current != nil {
 		view.Status = transport.StatusInProgress

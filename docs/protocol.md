@@ -249,6 +249,9 @@ A rejected action leaves the session state unchanged and produces no `StateUpdat
 - `session_id` - the session described.
 - `matches` - the `MatchResult` of each match finished in the session, oldest first. Empty until a match ends. The history is kept only while the server runs.
 
+**`GenerateJoinTokenRequest`**
+
+- `session_id` - the session to generate a new join token for.
 
 **`StateUpdate`**
 

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log"
 	"net/http"
 
@@ -11,7 +12,7 @@ import (
 )
 
 func NewWebSocketHandler(config ServerConfig, games *game.Registry) http.Handler {
-	sessions := session.NewSessionStore()
+	sessions := session.NewSessionStore(context.TODO())
 	upgrader := websocket.Upgrader{
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,

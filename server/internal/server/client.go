@@ -226,6 +226,8 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 			return
 		}
 		c.Send(transport.EncodeMatchHistoryResponse(msg.Sequence, msg.SessionID, c.session.History(ctx)))
+	case transport.KindGenerateJoinToken:
+		c.handleGenerateJoinToken(ctx, msg)
 	case transport.KindAction:
 		if !c.inSession(msg) {
 			slog.Warn("action rejected",
@@ -357,6 +359,15 @@ func (c *Client) handleListSessions(ctx context.Context, msg transport.ClientMes
 	}
 	slices.SortFunc(infos, func(a, b transport.SessionInfo) int { return strings.Compare(a.SessionID, b.SessionID) })
 	c.Send(transport.EncodeListSessionsResponse(msg.Sequence, infos))
+}
+
+func (c *Client) handleGenerateJoinToken(ctx context.Context, msg transport.ClientMessage) {
+	if !c.inSession(msg) {
+		return
+	}
+	if err := c.session.GenerateJoinToken(ctx, c.ID, msg.Sequence); err != nil {
+		c.Send(transport.EncodeError(msg.Sequence, err))
+	}
 }
 
 func newSessionID() string {

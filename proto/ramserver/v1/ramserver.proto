@@ -22,6 +22,7 @@ message ClientMessage {
     LegalActionsRequest legal_actions_request = 8;
     ListSessionsRequest list_sessions_request = 9;
     MatchHistoryRequest match_history_request = 10;
+    GenerateJoinTokenRequest generate_join_token_request = 11;
   }
 }
 
@@ -118,6 +119,11 @@ message LegalActionsResponse {
 message LegalActionSpec {
   bytes payload = 1;
   string description = 2;
+}
+
+// Sent to request that the current join token is replaced with a newly generated join token.
+message GenerateJoinTokenRequest {
+  string session_id = 1;
 }
 
 // Session snapshot, broadcast on membership, status, or game-state changes.

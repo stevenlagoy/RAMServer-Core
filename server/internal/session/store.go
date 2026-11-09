@@ -34,6 +34,12 @@ func (st *SessionStore) Create(id, gameName string, g game.Game, public bool) (*
 	}
 	ctx, cancel := context.WithCancel(st.ctx)
 	s := NewSession(id, gameName, g, public)
+	token, err := generateJoinToken(id)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("generate initial join token: %w", err)
+	}
+	s.setJoinToken(token)
 	s.onEmpty = func() { st.Remove(id) }
 	st.sessions[id] = storedSession{session: s, cancel: cancel}
 	go s.Run(ctx)
@@ -48,7 +54,7 @@ func (st *SessionStore) Get(id string) (*Session, bool) {
 	// Find by Join Token
 	if !ok {
 		for _, s := range st.sessions {
-			if s.session.joinToken == id {
+			if s.session.joinTokenValue() == id {
 				stored, ok = s, true
 			}
 		}

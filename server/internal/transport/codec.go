@@ -86,6 +86,7 @@ const (
 	KindLegalActions
 	KindListSessions
 	KindMatchHistory
+	KindGenerateJoinToken
 )
 
 func (k ClientMessageKind) String() string {
@@ -128,7 +129,7 @@ type ClientMessage struct {
 	ReconnectToken string
 
 	// KindJoinSession (GameID, SessionID, CreateNew, PrivateSession); KindListSessions (GameID, an optional filter);
-	// KindLeaveSession, KindAction, KindSetReady, KindLegalActions and KindMatchHistory (SessionID)
+	// KindLeaveSession, KindAction, KindSetReady, KindLegalActions, KindMatchHistory, KindGenerateJoinToken (SessionID)
 	GameID         string
 	SessionID      string
 	CreateNew      bool
@@ -186,6 +187,9 @@ func DecodeClientMessage(frame []byte) (ClientMessage, error) {
 	case *pb.ClientMessage_MatchHistoryRequest:
 		msg.Kind = KindMatchHistory
 		msg.SessionID = p.MatchHistoryRequest.GetSessionId()
+	case *pb.ClientMessage_GenerateJoinTokenRequest:
+		msg.Kind = KindGenerateJoinToken
+		msg.SessionID = p.GenerateJoinTokenRequest.GetSessionId()
 	default:
 		return msg, NewError(CodeMalformedMessage, "client message has no known payload")
 	}
