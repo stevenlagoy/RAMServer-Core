@@ -43,6 +43,14 @@ func (st *SessionStore) Get(id string) (*Session, bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	s, ok := st.sessions[id]
+	// Find by Join Token
+	if !ok {
+		for _, session := range st.sessions {
+			if session.joinToken == id {
+				s, ok = session, true
+			}
+		}
+	}
 	return s, ok
 }
 

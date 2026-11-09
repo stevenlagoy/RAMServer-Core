@@ -225,6 +225,7 @@ type StateUpdate struct {
 	PlayerOrder    []string
 	OwnerPlayerID  string
 	Annotations    map[string]string
+	JoinToken      string
 }
 
 type SessionPlayer struct {
@@ -253,6 +254,7 @@ type PlayerActionSummary struct {
 
 type SessionInfo struct {
 	SessionID     string
+	JoinToken     string
 	GameID        string
 	Status        SessionStatus
 	Players       []SessionPlayer
@@ -327,16 +329,17 @@ func EncodeStateUpdate(inReplyTo uint64, s StateUpdate) []byte {
 	return marshal(&pb.ServerMessage{
 		InReplyTo: inReplyTo,
 		Payload: &pb.ServerMessage_StateUpdate{StateUpdate: &pb.StateUpdate{
-			SessionId:      s.SessionID,
-			GameId:         s.GameID,
-			Status:         s.Status,
-			Players:        playersToPB(s.Players),
-			StateVersion:   s.StateVersion,
-			EncodedView:    s.EncodedView,
-			ActivePlayerId: s.ActivePlayerID,
-			PlayerOrder:    s.PlayerOrder,
-			OwnerPlayerId:  s.OwnerPlayerID,
-			Annotations:    s.Annotations,
+			SessionId:        s.SessionID,
+			GameId:           s.GameID,
+			Status:           s.Status,
+			Players:          playersToPB(s.Players),
+			StateVersion:     s.StateVersion,
+			EncodedView:      s.EncodedView,
+			ActivePlayerId:   s.ActivePlayerID,
+			PlayerOrder:      s.PlayerOrder,
+			OwnerPlayerId:    s.OwnerPlayerID,
+			Annotations:      s.Annotations,
+			SessionJoinToken: s.JoinToken,
 		}},
 	})
 }
@@ -373,6 +376,7 @@ func EncodeListSessionsResponse(inReplyTo uint64, sessions []SessionInfo) []byte
 	for i, s := range sessions {
 		infos[i] = &pb.SessionInfo{
 			SessionId:     s.SessionID,
+			JoinToken:     s.JoinToken,
 			GameId:        s.GameID,
 			Status:        s.Status,
 			Players:       playersToPB(s.Players),

@@ -133,6 +133,7 @@ message StateUpdate {
   string owner_player_id = 9;
   // Game-defined key/value facts about state which don't require parsing encoded_view.
   map<string, string> annotations = 10;
+  string session_join_token = 11;
 }
 
 message SessionPlayer {
@@ -169,6 +170,7 @@ message SessionInfo {
   repeated SessionPlayer players = 4;
   string owner_player_id = 5;
   bool joinable = 6;
+  string join_token = 7;
 }
 
 message MatchHistoryRequest {

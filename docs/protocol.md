@@ -238,6 +238,7 @@ A rejected action leaves the session state unchanged and produces no `StateUpdat
 
 - `session_id`, `game_id`, `status`, `players`, `owner_player_id` - as in `StateUpdate`.
 - `joinable` - `true` if a `JoinSessionRequest` for this session would be accepted right now: the match has not started and the game has a role with room.
+- `join_token` - A unique token which can be used to join this session.
 
 **`MatchHistoryRequest`**
 
@@ -261,6 +262,7 @@ A rejected action leaves the session state unchanged and produces no `StateUpdat
 - `player_order` - the full turn order; empty until the game sets one. Needed for games with more than two players, where "next turn" is not just "the other player."
 - `owner_player_id` - the session's owner: the first member to join who is still present.
 - `annotations` - small game-defined key/value strings about the state, readable without parsing `encoded_view`. Empty while the session is waiting. A game documents its own keys; clients ignore keys they do not know. Unlike `encoded_view`, annotations are optional for a game to provide.
+- `session_join_token` - a shareable join token which acts like the Session ID for the purposes of joining a session
 
 **`SessionPlayer`**
 

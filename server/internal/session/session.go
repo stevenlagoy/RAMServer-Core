@@ -2,10 +2,15 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"log"
 	"log/slog"
 	"runtime/debug"
+	"strings"
+	"time"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/match"
@@ -44,11 +49,12 @@ type Session struct {
 
 	// Below owned exclusively by Run goroutine
 
-	order        []string // join order, order[0] is current owner
-	members      map[string]*Member
-	history      []MatchResult
-	current      *match.Match
-	stateVersion uint64
+	order   []string // join order, order[0] is current owner
+	members map[string]*Member
+	history []MatchResult
+	current *match.Match
+
+	joinToken string
 }
 
 // Creates an empty Session; its creator joins through Join like any other member
@@ -234,6 +240,39 @@ func (s *Session) History(ctx context.Context) []transport.MatchResult {
 	case <-ctx.Done():
 		return nil
 	}
+}
+
+func (s *Session) GenerateJoinToken() (string, error) {
+	cryptoBuf := make([]byte, 8)
+	if _, err := rand.Read(cryptoBuf); err != nil {
+		return "", err
+	}
+	timeBuf := make([]byte, 8)
+	binary.BigEndian.PutUint64(timeBuf, uint64(time.Now().UnixNano()))
+
+	hasher := sha256.New()
+	hasher.Write([]byte(s.ID))
+	hasher.Write(timeBuf)
+	hasher.Write(cryptoBuf)
+	hashBytes := hasher.Sum(nil)
+
+	tokenRunes := []rune{
+		'A', 'B', 'C', 'D', 'E', 'F', 'G',
+		'H', 'J', 'K', 'M', 'N', 'P', 'R',
+		'S', 'T', 'U', 'V', 'W', 'X', 'Y',
+		'3', '4', '5', '6', '7', '8', '9',
+	}
+	possibilities := uint64(len(tokenRunes))
+
+	var result strings.Builder
+	for i := range 6 {
+		// Read a unique 4-byte window from the hash for each character position
+		chunk := binary.BigEndian.Uint32(hashBytes[i*4 : (i+1)*4])
+		idx := uint64(chunk) % possibilities
+		result.WriteRune(tokenRunes[idx])
+	}
+	s.joinToken = result.String()
+	return result.String(), nil
 }
 
 // Session's actor loop. Owns exclusively every mutable field on Session
@@ -506,6 +545,7 @@ func (s *Session) viewFor(memberID string) transport.StateUpdate {
 		Players:       s.players(),
 		StateVersion:  s.stateVersion,
 		OwnerPlayerID: s.Owner(),
+		JoinToken:     s.joinToken,
 	}
 	if s.current != nil {
 		view.Status = transport.StatusInProgress
