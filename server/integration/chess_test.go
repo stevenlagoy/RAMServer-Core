@@ -137,3 +137,52 @@ func TestCheckmateEndsTheSessionMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestResigningOutOfTurnEndsTheMatch(t *testing.T) {
+	s, ctx, white, black, started := startChessMatch(t)
+
+	// It is white's turn, and black resigns anyway
+	s.Submit(ctx, game.Action{ID: 5, ActorID: "black", Payload: []byte("resign")}, s.ID, started[0].GetStateVersion(), black)
+	for _, r := range []*recorder{white, black} {
+		if got := r.next(t); got.GetStateUpdate() == nil {
+			t.Fatalf("expected a StateUpdate for the resignation, got %v", got)
+		}
+	}
+	for name, r := range map[string]*recorder{"white": white, "black": black} {
+		got := r.next(t)
+		result := got.GetMatchResult()
+		if result == nil || got.GetInReplyTo() != 0 {
+			t.Fatalf("%s: expected an unsolicited MatchResult, got %v", name, got)
+		}
+		if result.GetDraw() || len(result.GetWinnerPlayerIds()) != 1 || result.GetWinnerPlayerIds()[0] != "white" ||
+			result.GetTerminationReason() != "RESIGNATION" || result.GetTurns() != 1 {
+			t.Fatalf("%s: expected white to win by resignation, got %v", name, result)
+		}
+	}
+}
+
+func TestStateUpdatesCarryCheckAnnotations(t *testing.T) {
+	s, ctx, white, black, started := startChessMatch(t)
+
+	// 1. e4 f5 2. Qh5+ checks the black king through the square f7 which the f-pawn left
+	moves := []struct{ actor, uci string }{{"white", "e2e4"}, {"black", "f7f5"}, {"white", "d1h5"}}
+	senders := map[string]*recorder{"white": white, "black": black}
+	stateVersion := started[0].GetStateVersion()
+	var last *pb.StateUpdate
+	for i, m := range moves {
+		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: m.actor, Payload: []byte(m.uci)}, s.ID, stateVersion, senders[m.actor])
+		for _, r := range []*recorder{white, black} {
+			last = r.next(t).GetStateUpdate()
+		}
+		stateVersion = last.GetStateVersion()
+	}
+	want := map[string]string{"plies": "3", "last_move": "d1h5", "check": "black", "checkers": "h5", "king_unsafe": "f7"}
+	for key, value := range want {
+		if got := last.GetAnnotations()[key]; got != value {
+			t.Errorf("annotation %s = %q, want %q", key, got, value)
+		}
+	}
+	if _, offered := last.GetAnnotations()["draw_offer"]; offered {
+		t.Error("a draw offer is reported although none was made")
+	}
+}

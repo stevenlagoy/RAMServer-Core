@@ -494,3 +494,139 @@ func TestEachMemberReceivesOnlyTheirOwnView(t *testing.T) {
 		}
 	}
 }
+
+// spectatorGame has one player seat and unlimited spectators
+type spectatorGame struct{ StubGame.StubGame }
+
+func (g *spectatorGame) Roles() []game.RoleSpec {
+	return []game.RoleSpec{{Name: game.RolePlayer, Min: 1, Max: 1}, {Name: game.RoleSpectator}}
+}
+
+// reasonGame ends its match with a winner and a game-defined termination reason
+type reasonGame struct{ StubGame.StubGame }
+
+func (g *reasonGame) Outcome(state game.GameState) (game.MatchResult, bool) {
+	if _, done := g.StubGame.Outcome(state); !done {
+		return nil, false
+	}
+	return StubGame.Result{Result: game.Result{WinnerIDs: []string{"a"}, Reason: "TEST_REASON"}}, true
+}
+
+// annotatedGame attaches a per-member annotation to every view
+type annotatedGame struct{ StubGame.StubGame }
+
+func (g *annotatedGame) Annotations(_ game.GameState, memberID string) map[string]string {
+	return map[string]string{"who": memberID}
+}
+
+func TestStateUpdateReportsRolesReadinessAndOwner(t *testing.T) {
+	s, ctx := startSession(t, &spectatorGame{})
+	a, b := newFakeSender(), newFakeSender()
+	if err := s.Join(ctx, "a", "Alice", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	a.next(t)
+	if err := s.Join(ctx, "b", "Bob", 1, b); err != nil {
+		t.Fatal(err)
+	}
+	a.next(t)
+	b.next(t)
+	s.SetReady(ctx, "a", true, 2) // b is not ready, so the match does not start
+
+	state := b.next(t).GetStateUpdate()
+	if state.GetStatus() != pb.SessionStatus_SESSION_STATUS_WAITING || state.GetOwnerPlayerId() != "a" {
+		t.Fatalf("expected a waiting session owned by a, got %v", state)
+	}
+	players := state.GetPlayers()
+	if len(players) != 2 {
+		t.Fatalf("expected 2 players, got %v", players)
+	}
+	if p := players[0]; p.GetPlayerId() != "a" || p.GetRole() != "player" || !p.GetReady() {
+		t.Errorf("first member = %v, want a, role player, ready", p)
+	}
+	if p := players[1]; p.GetPlayerId() != "b" || p.GetRole() != "spectator" || p.GetReady() {
+		t.Errorf("second member = %v, want b, role spectator, not ready", p)
+	}
+}
+
+func TestInfoDescribesTheSession(t *testing.T) {
+	s, ctx := startSession(t, &StubGame.StubGame{})
+	a := newFakeSender()
+	if err := s.Join(ctx, "a", "Alice", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	a.next(t)
+
+	info, ok := s.Info(ctx)
+	if !ok || info.SessionID != "s1" || info.GameID != "test" || info.Status != transport.StatusWaiting ||
+		!info.Joinable || info.OwnerPlayerID != "a" || len(info.Players) != 1 || info.Players[0].Role != "player" {
+		t.Fatalf("unexpected info for a waiting session: %+v (ok=%v)", info, ok)
+	}
+
+	s.SetReady(ctx, "a", true, 2) // the stub starts with one ready player
+	a.next(t)
+	if info, _ := s.Info(ctx); info.Status != transport.StatusInProgress || info.Joinable {
+		t.Fatalf("a running match must be in progress and not joinable, got %+v", info)
+	}
+}
+
+func TestFullSessionIsNotJoinableInInfo(t *testing.T) {
+	s, ctx := startSession(t, &oneSeatGame{})
+	a := newFakeSender()
+	if err := s.Join(ctx, "a", "", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := s.Info(ctx); info.Joinable {
+		t.Fatalf("a session with no free seat is joinable: %+v", info)
+	}
+}
+
+func TestMatchResultCarriesReasonAndTurnsAndIsKeptInHistory(t *testing.T) {
+	s, ctx := startSession(t, &reasonGame{})
+	senders, started := startMatch(t, s, ctx, "a", "b")
+	a, b := senders["a"], senders["b"]
+	stateVersion := started["a"].GetStateVersion()
+	if history := s.History(ctx); len(history) != 0 {
+		t.Fatalf("history before any match ended = %v, want empty", history)
+	}
+
+	for i, actor := range []string{"a", "b", "a", "b"} { // the stub ends after four actions
+		s.Submit(ctx, game.Action{ID: uint64(10 + i), ActorID: actor, Payload: []byte("NoOp")}, s.ID, stateVersion, senders[actor])
+		a.next(t)
+		b.next(t)
+		stateVersion++
+	}
+	for name, f := range map[string]*fakeSender{"a": a, "b": b} {
+		result := f.next(t).GetMatchResult()
+		winners := result.GetWinnerPlayerIds()
+		if result == nil || result.GetDraw() || len(winners) != 1 || winners[0] != "a" ||
+			result.GetTerminationReason() != "TEST_REASON" || result.GetTurns() != 4 {
+			t.Fatalf("%s: unexpected MatchResult %v", name, result)
+		}
+	}
+
+	history := s.History(ctx)
+	if len(history) != 1 {
+		t.Fatalf("expected one finished match in the history, got %v", history)
+	}
+	if h := history[0]; h.Draw || h.TerminationReason != "TEST_REASON" || h.Turns != 4 || h.SessionID != "s1" ||
+		len(h.WinnerPlayerIDs) != 1 || h.WinnerPlayerIDs[0] != "a" {
+		t.Fatalf("unexpected history entry %+v", h)
+	}
+}
+
+func TestStateUpdatesCarryGameAnnotations(t *testing.T) {
+	s, ctx := startSession(t, &annotatedGame{})
+	a := newFakeSender()
+	if err := s.Join(ctx, "a", "", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	if waiting := a.next(t).GetStateUpdate(); len(waiting.GetAnnotations()) != 0 {
+		t.Fatalf("a waiting session has annotations %v", waiting.GetAnnotations())
+	}
+	s.SetReady(ctx, "a", true, 2) // the stub starts with one ready player
+	started := a.next(t).GetStateUpdate()
+	if started.GetStatus() != pb.SessionStatus_SESSION_STATUS_IN_PROGRESS || started.GetAnnotations()["who"] != "a" {
+		t.Fatalf("expected an in-progress update annotated for a, got %v", started)
+	}
+}
