@@ -2,7 +2,7 @@ version: v2
 
 inputs:
   - git_repo: https://github.com/stevenlagoy/RAMServer-Core.git
-    branch: feature/58-69-private-sessions
+    branch: main
     subdir: proto
 
 plugins:
