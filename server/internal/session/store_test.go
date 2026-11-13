@@ -4,11 +4,127 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stevenlagoy/ramserver-core/server/game"
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 )
+
+// returnsWithin fails unless call returns within a second, then fails with any error it returns
+func returnsWithin(t *testing.T, call func() error) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- call() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the call blocked instead of returning")
+	}
+}
+
+// Every call returns once a Session has stopped
+func TestCallsOnStoppedSessionReturn(t *testing.T) {
+	st := NewSessionStore(t.Context())
+	s, err := st.Create("sess-1", "stub", &StubGame.StubGame{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := newFakeSender()
+	if err := s.Join(t.Context(), "a", "Alice", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	a.next(t)
+	s.Leave(t.Context(), "a")
+	waitStopped(t, s)
+
+	ctx := context.Background() // never cancelled, so only s.stopped can unblock a call
+	calls := []struct {
+		name string
+		call func() error
+	}{
+		{"Join", func() error {
+			if err := s.Join(ctx, "b", "Bob", 2, newFakeSender()); !errors.Is(err, ErrSessionClosed) {
+				return fmt.Errorf("err = %v, want ErrSessionClosed", err)
+			}
+			return nil
+		}},
+		{"Leave", func() error { s.Leave(ctx, "a"); return nil }},
+		{"SetReady", func() error { s.SetReady(ctx, "a", true, 3); return nil }},
+		{"Submit", func() error { s.Submit(ctx, game.Action{ID: 4, ActorID: "a"}, s.ID, 0, a); return nil }},
+		{"LegalMoves", func() error {
+			if moves := s.LegalMoves(ctx, "a"); len(moves) != 0 {
+				return fmt.Errorf("legal moves = %v, want none", moves)
+			}
+			return nil
+		}},
+		{"Info", func() error {
+			if _, ok := s.Info(ctx); ok {
+				return errors.New("ok = true, want false for a stopped session")
+			}
+			return nil
+		}},
+		{"History", func() error {
+			if matches := s.History(ctx); len(matches) != 0 {
+				return fmt.Errorf("history = %v, want none", matches)
+			}
+			return nil
+		}},
+	}
+	for _, c := range calls {
+		t.Run(c.name, func(t *testing.T) { returnsWithin(t, c.call) })
+	}
+}
+
+// panickingRolesGame panics while a member joins
+type panickingRolesGame struct{ StubGame.StubGame }
+
+func (g *panickingRolesGame) Roles() []game.RoleSpec { panic("roles failed") }
+
+// panickingActionsGame panics while listing legal actions
+type panickingActionsGame struct{ StubGame.StubGame }
+
+func (g *panickingActionsGame) LegalActions(game.GameState, string) []game.ActionSpec {
+	panic("legal actions failed")
+}
+
+// A request whose handler panics gets an answer instead of waiting forever on a Session that is still running
+func TestPanickingRequestStillAnswers(t *testing.T) {
+	ctx := context.Background() // never cancelled, so only a closed reply channel can unblock a call
+
+	s, _ := startSession(t, &panickingRolesGame{})
+	returnsWithin(t, func() error {
+		if err := s.Join(ctx, "a", "Alice", 1, newFakeSender()); !errors.Is(err, ErrRequestFailed) {
+			return fmt.Errorf("join: err = %v, want ErrRequestFailed", err)
+		}
+		return nil
+	})
+
+	s, sctx := startSession(t, &panickingActionsGame{})
+	a := newFakeSender()
+	if err := s.Join(sctx, "a", "Alice", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	a.next(t)
+	s.SetReady(sctx, "a", true, 2) // the stub starts with one ready player
+	a.next(t)
+	returnsWithin(t, func() error {
+		if moves := s.LegalMoves(ctx, "a"); len(moves) != 0 {
+			return fmt.Errorf("legal moves = %v, want none", moves)
+		}
+		return nil
+	})
+	returnsWithin(t, func() error { // and the Session keeps working afterwards
+		if _, ok := s.Info(ctx); !ok {
+			return errors.New("info failed after a panicking request")
+		}
+		return nil
+	})
+}
 
 // waitStopped fails unless s's Run goroutine exits within a second
 func waitStopped(t *testing.T, s *Session) {
