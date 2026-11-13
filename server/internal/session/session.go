@@ -129,6 +129,8 @@ var (
 	)
 	// Returned by Join when the Session has stopped, such as after its last member left
 	ErrSessionClosed = transport.WrapError(transport.CodeSessionNotJoinable, errors.New("session has closed"))
+	// Returned by Join when the Session failed while handling the request
+	ErrRequestFailed = transport.WrapError(transport.CodeInternal, errors.New("the session failed to handle the request"))
 
 	ErrNotInSession = errors.New(
 		"player is not in the requested session",
@@ -150,16 +152,17 @@ func (s *Session) send(ctx context.Context, msg sessionMsg) bool {
 	return false
 }
 
-// Waits for Run's reply to a request it accepted. Returns false if ctx is cancelled or the Session stops first
+// Waits for Run's reply to a request it accepted. Returns false if ctx is cancelled, the Session stops,
+// or handling the request panicked (Run closes the reply channel without replying)
 func await[T any](ctx context.Context, s *Session, reply chan T) (T, bool) {
 	select {
-	case v := <-reply:
-		return v, true
+	case v, ok := <-reply:
+		return v, ok
 	case <-ctx.Done():
 	case <-s.stopped:
 		select {
-		case v := <-reply: // Run may have replied just before stopping
-			return v, true
+		case v, ok := <-reply: // Run may have replied just before stopping
+			return v, ok
 		default:
 		}
 	}
@@ -167,12 +170,32 @@ func await[T any](ctx context.Context, s *Session, reply chan T) (T, bool) {
 	return zero, false
 }
 
-// The error for a request that got no reply: ctx's error if it was cancelled, otherwise ErrSessionClosed
+// The error for a request that got no reply: ctx's error if it was cancelled, ErrSessionClosed if the
+// Session has stopped, otherwise ErrRequestFailed because handling the request panicked
 func (s *Session) noReplyErr(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return ErrSessionClosed
+	select {
+	case <-s.stopped:
+		return ErrSessionClosed
+	default:
+		return ErrRequestFailed
+	}
+}
+
+// Closes the reply channel of a request which expects one, so its caller stops waiting
+func (m sessionMsg) closeReply() {
+	switch {
+	case m.join != nil:
+		close(m.join.reply)
+	case m.legalMoves != nil:
+		close(m.legalMoves.reply)
+	case m.info != nil:
+		close(m.info.reply)
+	case m.history != nil:
+		close(m.history.reply)
+	}
 }
 
 // Adds clientID to the lobby, blocking until Run processes the request, ctx is cancelled, or the Session stops.
@@ -267,6 +290,7 @@ func (s *Session) handle(msg sessionMsg) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("session %s: panic handling message: %v\n%s", s.ID, r, debug.Stack())
+			msg.closeReply()
 		}
 	}()
 	switch {
