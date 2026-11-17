@@ -315,8 +315,19 @@ class WebSocketTransport:
         return result
  
     def close(self) -> None:
+        sock = getattr(self.ws, "sock", None)
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                sock.close()
+            except OSError:
+                pass
+            return
         try:
-            self.ws.close(timeout=1)
+            self.ws.close(timeout=0)
         except Exception:  # closing a connection which already failed is not an error worth reporting
             pass
  
@@ -419,6 +430,7 @@ class NetworkClient:
             if generation == self._generation:
                 self.events.put(event)
 
+        self._log(f"connecting to {address.display}")
         try:
             transport = open_transport(address)
         except Exception as error:  # OSError, a refused WebSocket handshake, or a missing library
@@ -589,11 +601,11 @@ class NetworkClient:
         self._outbox = self._writer = self.transport = None
         self.session_id = self.player_id = ""
         if outbox is not None: outbox.put(None)
+        if wait > 0 and writer is not None:
+            writer.join(wait)
         if transport is not None:
             transport.close()
             # Close the connection even if the writer is stuck
             timer = threading.Timer(CLOSE_GRACE, transport.close)
             timer.daemon = True
             timer.start()
-        if wait > 0 and writer is not None:
-            writer.join(wait)
