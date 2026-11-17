@@ -1,10 +1,10 @@
 import pygame
 from pygame import Rect, Surface
 
-from .base import Scene
-from ..networking import STATUS_NAMES, HistoryEvent, LeftEvent, MatchSummary, SessionInfo, SessionsEvent, Snapshot, StateEvent, Event
-from ..outcome import history_text
-from ..ui import ACCENT_COLOR, MUTED_TEXT_COLOR, PANEL_ALT_COLOR, TEXT_COLOR, WARNING_COLOR, Button, TextInput, Widget, clipboard_put, draw_panel, draw_text
+from scenes.base import Scene
+from networking import STATUS_NAMES, HistoryEvent, LeftEvent, MatchSummary, SessionInfo, SessionsEvent, Snapshot, StateEvent, Event
+from outcome import history_text
+from ui import ACCENT_COLOR, MUTED_TEXT_COLOR, PANEL_ALT_COLOR, TEXT_COLOR, WARNING_COLOR, Button, TextInput, Widget, clipboard_put, draw_panel, draw_text
 
 
 REFRESH_SECONDS = 3.0
@@ -79,13 +79,13 @@ class LobbyScene(Scene):
         if clipboard_put(session_id):
             self.app.toast("Lobby ID copied")
         else:
-            self.app.toast(f"Lobby ID: {session_id}")
+            self.app.toast(f"Lobby ID: {session_id} (copied inside the app only)")
 
     def on_net_event(self, event: Event) -> None:
         if isinstance(event, StateEvent):
             snapshot = event.snapshot
             if snapshot.in_progress:
-                from .game import GameScene
+                from scenes.game import GameScene
                 self.app.replace(GameScene(self.app, snapshot))
                 return
             first = self.snapshot is None
@@ -124,12 +124,12 @@ class LobbyScene(Scene):
         top = int(u * 3.6)
         left_width = int((width - 3 * u) * 0.56)
         self.left = Rect(u, top, left_width, height - top - u)
-        self.left = Rect(self.left.right + u, top, width - 3 * u - left_width, height - top - u)
+        self.right = Rect(self.left.right + u, top, width - 3 * u - left_width, height - top - u)
         self.row, self.gap = int(u * 1.7), u // 3
         row, gap = self.row, self.gap
 
         self.settings_button.rect = Rect(width - u - u * 6, u // 2, u * 6, int(u * 1.6))
-        self.disconnect_button.rect = Rect(self.settings_button.rect.x - gap - u * 4, u // 2, u * 7, int(u * 1.6))
+        self.disconnect_button.rect = Rect(self.settings_button.rect.x - gap - u * 7, u // 2, u * 7, int(u * 1.6))
 
         pad = u // 2
         inner = Rect(self.left.x + pad, self.left.y + pad, self.left.width - 2 * pad, self.left.height - 2 * pad)
@@ -242,7 +242,7 @@ class LobbyScene(Scene):
                 right = draw_text(screen, player.role.capitalize(), int(u * 0.9), MUTED_TEXT_COLOR, midright=(right, row.centery)).left - u
             if player.player_id == snapshot.owner_id:
                 right = draw_text(screen, "Host", int(u * 0.9), (230, 200, 90), midright=(right, row.centery)).left - u
-                draw_text(screen, name, int(u * 1.1), TEXT_COLOR, max_width=right + u // 2 - (row.x + u // 2), midleft=(row.x + u // 2, row.centery))
+            draw_text(screen, name, int(u * 1.1), TEXT_COLOR, max_width=right + u // 2 - (row.x + u // 2), midleft=(row.x + u // 2, row.centery))
 
         me = self.my_player()
         spectating = bool(me and me.role == SPECTATOR)

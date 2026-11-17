@@ -1,7 +1,7 @@
 import pygame
 from pygame import Rect, Surface
 
-from .ui import BUTTON_DISABLED_COLOR, NEUTRAL_COLOR, NEUTRAL_HOVER_COLOR, draw_text
+from ui import BUTTON_DISABLED_COLOR, NEUTRAL_COLOR, NEUTRAL_HOVER_COLOR, draw_text
 
 DIM_COLOR = (0, 0, 0, 150)  # darkens the board behind the panel
 PANEL_COLOR = (40, 40, 40)

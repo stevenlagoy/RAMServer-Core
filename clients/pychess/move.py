@@ -1,8 +1,8 @@
 import re
 from dataclasses import dataclass
 
-from .piece import PieceType
-from .board import file_ord_to_char, file_char_to_ord
+from piece import PieceType
+from board import file_ord_to_char, file_char_to_ord
 
 UCI_PATTERN = re.compile(r"([a-h])([1-8])([a-h])([1-8])([qrbn])?(\(=\))?")
 DRAW_MARK = "(=)"  # offers a draw when it follows a move

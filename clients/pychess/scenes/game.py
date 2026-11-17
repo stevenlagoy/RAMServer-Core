@@ -5,17 +5,17 @@ from dataclasses import replace
 import pygame
 from pygame import Rect, Surface
 
-from ..animation import MovePlan, duration_for, plan_move
-from .base import Scene
-from ..board import START_FEN, Board, square_from_uci
-from .dialogs import ConfirmDialog
-from ..end_screen import EndScreen
-from ..fen import GameView, parse_fen
-from ..move import ACCEPT_DRAW, DRAW_MARK, RESIGN, Move
-from ..networking import STATUS_WAITING, ErrorEvent, Event, LegalMovesEvent, MatchEnded, Snapshot, StateEvent, readable_error
-from ..outcome import result_text
-from ..piece import Piece, PieceType, PlayerColor
-from ..ui import *
+from animation import MovePlan, duration_for, plan_move
+from scenes.base import Scene
+from board import START_FEN, Board, square_from_uci
+from scenes.dialogs import ConfirmDialog
+from end_screen import EndScreen
+from fen import GameView, parse_fen
+from move import ACCEPT_DRAW, DRAW_MARK, RESIGN, Move
+from networking import STATUS_WAITING, ErrorEvent, Event, LegalMovesEvent, MatchEnded, Snapshot, StateEvent, readable_error
+from outcome import result_text
+from piece import Piece, PieceType, PlayerColor
+from ui import *
 
 
 SCREEN_CAPTION = "Chess"
@@ -63,7 +63,7 @@ class GameScene(Scene):
         self.resign_button = Button("Resign", self.ask_resign, kind="danger")
         self.settings_button = Button("Settings", self.app.open_settings, kind="neutral")
         self.accept_button = Button("Accept", self.accept_draw)
-        self.decline_button = Button("Delcine", self.decline_draw, kind="neutral")
+        self.decline_button = Button("Decline", self.decline_draw, kind="neutral")
         self.panel = self.top_row = self.bottom_row = self.status_rect = self.banner_rect = Rect(0, 0, 0, 0)
 
         self.apply_snapshot(snapshot, animate=False)
@@ -175,7 +175,7 @@ class GameScene(Scene):
         )
 
     def back_to_lobby(self) -> None:
-        from .lobby import LobbyScene
+        from scenes.lobby import LobbyScene
         self.app.replace(LobbyScene(self.app, self.lobby_snapshot or self.snapshot))
 
     @property
@@ -285,11 +285,11 @@ class GameScene(Scene):
         if self.landscape:
             panel_width = min(max(int(width * 0.27), 200), 380)
             area = Rect(0, 0, width - panel_width - margin, height)
-            self.panel = Rect(area.right, margin, panel_width, height - 2)
+            self.panel = Rect(area.right, margin, panel_width, height - 2 * margin)
         else:
             panel_height = min(max(int(height * 0.3), 150), 280)
             area = Rect(0, 0, width, height - panel_height)
-            self.pane = Rect(margin, area.bottom, width - 2 * margin, panel_height - margin)
+            self.panel = Rect(margin, area.bottom, width - 2 * margin, panel_height - margin)
         self.board.resize(max(32, int(min(area.width, area.height) * BOARD_FILL)))
         self.board.center_on(area.center)
         self._layout_panel()
@@ -432,8 +432,9 @@ class GameScene(Scene):
         assert self.view is not None
         u, rect = self.unit, self.status_rect
         plies = self.displayed_plies if self.displayed_plies >= 0 else self.view.plies
+        draw_text(screen, f"Move {self.view.fullmove}", int(u * 1.45), TEXT_COLOR, midleft=(rect.x + u // 3, rect.y + int(u * 0.9)))
         draw_text(
-            screen, f"Move {self.view.fullmove}", int(u * 1.45), TEXT_COLOR, midleft=(rect.x + u // 3, rect.y + int(u * 0.9)),
+            screen, f"{plies} half-moves played", int(u * 0.8), MUTED_TEXT_COLOR, max_width=rect.width // 2,
             midright=(rect.right - u // 3, rect.y + int(u * 0.95))
         )
         text, color = self._status_text()
@@ -446,6 +447,7 @@ class GameScene(Scene):
         to_move = PlayerColor.WHITE if self.view and self.view.white_to_move else PlayerColor.BLACK
         mover = "White" if to_move == PlayerColor.WHITE else "Black"
         if self.draw_offerer == self.net.player_id and not self.spectating: return "Draw offer sent", WARNING_COLOR
+        if self.draw_offerer and self.spectating: return f"Draw offered to {mover}", WARNING_COLOR
         if in_check:
             who = "You are" if to_move == self.own_color else f"{mover} is"
             return f"{who} in check", ERROR_COLOR

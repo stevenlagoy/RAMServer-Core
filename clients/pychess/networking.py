@@ -11,7 +11,7 @@ from google.protobuf import text_format
 from google.protobuf.json_format import MessageToJson
 from dataclasses import dataclass, field
 
-from .gen.ramserver.v1 import ramserver_pb2 as _pb
+from gen.ramserver.v1 import ramserver_pb2 as _pb
 
 pb: Any = _pb
 
@@ -482,7 +482,9 @@ class NetworkClient:
                 write_frame(transport, payload)
         except OSError as error:
             report(f"Connection lost: {error}")
-        finally: transport.close()
+        finally:
+            transport.close()
+            self._log("connection closed")
  
     def poll(self) -> list[Event]:
         """Drain the queue. Call from the main thread once per frame."""
@@ -580,6 +582,7 @@ class NetworkClient:
  
     def close(self, wait: float = 0.0) -> None:
         """Leave the session and drop the connection. Events from the old connection are discarded."""
+        self._log(f"closing the connection (waiting up to {wait:g}s)")
         self.leave_session()
         outbox, writer, transport = self._outbox, self._writer, self.transport
         self._generation += 1

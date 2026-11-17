@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 import math
 
-from .piece import Piece, PieceType, PlayerColor
+from piece import Piece, PieceType, PlayerColor
 
 
 BASE_DURATION = 0.25 # seconds for a move at regular speed
@@ -69,7 +69,7 @@ def _piece_at(pieces: list[Piece], rank: int, file: int) -> Piece | None:
 
 
 def plan_move(before: list[Piece], after: list[Piece], uci: str, duration: float) -> MovePlan | None:
-    from .move import Move
+    from move import Move
     move = Move.from_uci(uci)
     if move is None: return None
     start, end = (move.from_rank, move.from_file), (move.to_rank, move.to_file)

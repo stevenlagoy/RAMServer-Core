@@ -1,12 +1,12 @@
 """Tests of the client's logic which needs no window: FEN, settings, styles, moves, outcome wording."""
 import json
 
-from ..fen import parse_fen
-from ..move import ACCEPT_DRAW, Move
-from ..outcome import history_text, reason_text, result_text
-from ..piece import PieceType
-from ..settings import Settings, default_custom_colors
-from ..styles import PRESETS, resolve_style, style_names
+from fen import parse_fen
+from move import ACCEPT_DRAW, Move
+from outcome import history_text, reason_text, result_text
+from piece import PieceType
+from settings import Settings, default_custom_colors
+from styles import PRESETS, resolve_style, style_names
 
 START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 

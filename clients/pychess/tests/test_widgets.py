@@ -1,11 +1,11 @@
 import pygame
 import pytest
 
-import clients.pychess.ui as ui
-from clients.pychess.board import Board
-from clients.pychess.end_screen import EndScreen
-from clients.pychess.piece import Piece, PieceType, PlayerColor
-from clients.pychess.ui import TextInput, draw_text
+import ui as ui
+from board import Board
+from end_screen import EndScreen
+from piece import Piece, PieceType, PlayerColor
+from ui import TextInput, draw_text
 
 
 @pytest.fixture(autouse=True)

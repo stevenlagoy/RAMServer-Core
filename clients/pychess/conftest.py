@@ -17,8 +17,8 @@ pytest.importorskip("gen.ramserver.v1.ramserver_pb2", reason="run `buf generate`
 @pytest.fixture
 def pieces_from_fen():
     """Build the Piece list for a FEN's placement, the way the client does."""
-    from .board import Board
-    from .piece import PlayerColor
+    from board import Board
+    from piece import PlayerColor
 
     def build(fen: str):
         board = Board(0, PlayerColor.WHITE)

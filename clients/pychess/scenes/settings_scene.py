@@ -3,10 +3,10 @@ from __future__ import annotations
 import pygame
 from pygame import Rect, Surface
 
-from .base import Scene
-from ..settings import CUSTOM_COLOR_KEYS, SPEED_RANGE, UNSAFE_MODES
-from ..styles import CUSTOM, style_names
-from ..ui import (BUTTON_DISABLED_COLOR, MUTED_TEXT_COLOR, PANEL_ALT_COLOR, TEXT_COLOR, Button, Selector, Slider,
+from scenes.base import Scene
+from settings import CUSTOM_COLOR_KEYS, SPEED_RANGE, UNSAFE_MODES
+from styles import CUSTOM, style_names
+from ui import (BUTTON_DISABLED_COLOR, MUTED_TEXT_COLOR, PANEL_ALT_COLOR, TEXT_COLOR, Button, Selector, Slider,
                 Toggle, Widget, draw_panel, draw_text)
 
 COLOR_LABELS = {"light": "Light squares", "dark": "Dark squares", "background": "Background", "border": "Border"}

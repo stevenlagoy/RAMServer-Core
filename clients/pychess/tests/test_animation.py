@@ -1,8 +1,8 @@
 """Tests of movement animation planning: which pieces move, which are captured, and the timing."""
 import pytest
 
-from clients.pychess.animation import GHOST_VISIBLE_UNTIL, LIFT_SCALE, PieceAnimation, duration_for, ease_in_out, plan_move
-from clients.pychess.piece import Piece, PieceType, PlayerColor
+from animation import GHOST_VISIBLE_UNTIL, LIFT_SCALE, PieceAnimation, duration_for, ease_in_out, plan_move
+from piece import Piece, PieceType, PlayerColor
 
 START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 

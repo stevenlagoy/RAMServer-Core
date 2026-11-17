@@ -4,8 +4,8 @@ import struct
 
 import pytest
 
-from .. import networking as n
-from ..networking import pb
+import networking as n
+from networking import pb
 
 
 def server_message(**fields):

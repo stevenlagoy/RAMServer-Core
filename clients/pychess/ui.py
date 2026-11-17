@@ -59,6 +59,9 @@ _system_clipboard_works = False
 def clipboard_put(text: str) -> bool:
     global _internal_clipboard, _system_clipboard_works
     _internal_clipboard = text
+    if os.environ.get("SDL_VIDEODRIVER") == "dummy" or pygame.display.get_driver() == "dummy":
+        _system_clipboard_works = False
+        return False
     try:
         pygame.scrap.init()
         if hasattr(pygame.scrap, "put_text"):
@@ -124,6 +127,8 @@ class Button(Widget):
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if self._clicked(event):
+            if debug_enabled():
+                print(f"[ui] clicked {self.label!r} at {event.pos}")
             self.on_click()
             return True
         return False
@@ -425,7 +430,7 @@ class TextInput(_LabeledWidget):
                 if key == pygame.K_x:
                     self._insert("")
         elif ctrl and key == pygame.K_v:
-            self._insert("".join(c for c in clipboard_get() if self._accepts(c)))
+            self._insert("".join(c for c in (clipboard_get() or "") if self._accepts(c)))  # a clipboard with nothing in it gives None on some platforms
         elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             if self.on_submit:
                 self.on_submit()

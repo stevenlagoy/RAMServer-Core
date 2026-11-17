@@ -9,9 +9,8 @@ import pytest
 import base64
 import hashlib
 
-
-import clients.pychess.networking as n
-from clients.pychess.networking import pb
+import networking as n
+from networking import pb
 
 
 class TestAddresses:

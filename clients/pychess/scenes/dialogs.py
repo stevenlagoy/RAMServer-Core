@@ -3,8 +3,8 @@ from typing import Callable
 from pygame import Rect, Surface
 import pygame
 
-from .base import Scene
-from ..ui import TEXT_COLOR, Button, draw_panel, draw_text
+from scenes.base import Scene
+from ui import TEXT_COLOR, Button, draw_panel, draw_text
 
 
 class ConfirmDialog(Scene):

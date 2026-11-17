@@ -1,10 +1,10 @@
 import pygame
 
-from .scenes.base import Scene
-from .networking import Event, NetworkClient
-from .settings import Settings
-from .styles import BoardStyle, resolve_style
-from .ui import BACKGROUND, Toasts
+from scenes.base import Scene
+from networking import Event, NetworkClient
+from settings import Settings
+from styles import BoardStyle, resolve_style
+from ui import BACKGROUND, Toasts
 
 
 MIN_WIDTH, MIN_HEIGHT = 320, 320
@@ -51,7 +51,7 @@ class App:
         self.push(scene)
  
     def show_connect(self, status: str = "") -> None:
-        from .scenes.connect import ConnectScene  # imported here because the scenes import each other
+        from scenes.connect import ConnectScene  # imported here because the scenes import each other
         self.net.close()
         self.auto = False  # an automatic session ended: do not loop
         self.reset(ConnectScene(self, status))
@@ -60,7 +60,7 @@ class App:
         self.toasts.add(text, error=error)
  
     def open_settings(self) -> None:
-        from .scenes.settings_scene import SettingsScene
+        from scenes.settings_scene import SettingsScene
         self.push(SettingsScene(self))
 
     def _base_index(self) -> int:
@@ -105,9 +105,12 @@ class App:
         pygame.display.flip()
  
     def run(self) -> None:
-        while self.running:
-            self.frame(self.clock.tick(60) / 1000)
-        self.settings.save()
-        self.net.close(wait=0.5)
-        pygame.quit()
- 
+        try:
+            while self.running:
+                self.frame(self.clock.tick(60) / 1000)
+        finally:
+            # Also when something raises: a crash must still leave the lobby and close the connection, or the server
+            # keeps the player in it until it notices the dead connection
+            self.settings.save()
+            self.net.close(wait=0.5)  # long enough to send the leave message, short enough that quitting is instant
+            pygame.quit()

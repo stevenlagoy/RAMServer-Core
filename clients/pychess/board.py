@@ -8,12 +8,12 @@ import pygame
 from pygame import Surface, Rect
 from pygame.draw import rect
 
-from .animation import PieceAnimation
-from .piece import Piece, PieceType, PlayerColor, get_sprite_file
-from .styles import BoardStyle
+from animation import PieceAnimation
+from piece import Piece, PieceType, PlayerColor, get_sprite_file
+from styles import BoardStyle
 
 if TYPE_CHECKING:
-    from .move import Move  # move imports board, so only for type hints
+    from move import Move  # move imports board, so only for type hints
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 

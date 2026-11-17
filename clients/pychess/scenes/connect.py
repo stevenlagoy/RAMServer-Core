@@ -3,13 +3,13 @@ from __future__ import annotations
 import pygame
 from pygame import Rect, Surface
 
-from ..networking import (
+from networking import (
     HOSTED_SERVER, LOCAL_SERVER, Authed, Connected,
     Disconnected, ErrorEvent, Event,
     parse_server_address, readable_error
 )
-from .base import Scene
-from ..ui import ERROR_COLOR, MUTED_TEXT_COLOR, TEXT_COLOR, Button, TextInput, draw_text
+from scenes.base import Scene
+from ui import ERROR_COLOR, MUTED_TEXT_COLOR, TEXT_COLOR, Button, TextInput, draw_text
 
 MAX_NAME_LENGTH = 24
 
@@ -89,7 +89,7 @@ class ConnectScene(Scene):
         if isinstance(event, Connected):
             self.status = "Signing in..."
         elif isinstance(event, Authed):
-            from .lobby import LobbyScene
+            from scenes.lobby import LobbyScene
             self.app.replace(LobbyScene(self.app))
         elif isinstance(event, ErrorEvent):
             self.connecting = False

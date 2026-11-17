@@ -3,11 +3,11 @@ import os
 import pygame
 import argparse
 
-from .app import App
-from .scenes.connect import ConnectScene
-from .settings import Settings
-from .styles import style_names
-from .networking import NetworkClient, HOSTED_SERVER
+from app import App
+from scenes.connect import ConnectScene
+from settings import Settings
+from styles import style_names
+from networking import NetworkClient, HOSTED_SERVER
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 1280, 720  # initial window size; the window can be resized
 SCREEN_CAPTION = "Chess"

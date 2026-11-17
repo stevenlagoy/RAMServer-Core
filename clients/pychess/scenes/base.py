@@ -4,10 +4,10 @@ from typing import TYPE_CHECKING
 
 import pygame
 
-from ..networking import Disconnected, ErrorEvent, Event, readable_error
+from networking import Disconnected, ErrorEvent, Event, readable_error
 
 if TYPE_CHECKING:
-    from ..app import App
+    from app import App
 
 
 class Scene:

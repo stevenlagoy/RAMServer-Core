@@ -7,15 +7,15 @@ from pathlib import Path
 import pygame
 import pytest
 
-from .. import networking as n
-from .. import piece as piece_module
-from ..app import App
-from ..scenes.connect import ConnectScene
-from ..scenes.dialogs import ConfirmDialog
-from ..scenes.game import GameScene
-from ..scenes.lobby import LobbyScene
-from ..scenes.settings_scene import SettingsScene
-from ..settings import Settings
+import networking as n
+import piece as piece_module
+from app import App
+from scenes.connect import ConnectScene
+from scenes.dialogs import ConfirmDialog
+from scenes.game import GameScene
+from scenes.lobby import LobbyScene
+from scenes.settings_scene import SettingsScene
+from settings import Settings
 
 START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 AFTER_E4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
@@ -117,7 +117,7 @@ def start_game(app, snapshot=None, version="1.2"):
 
 
 def square_pos(game, uci):
-    from ..board import square_from_uci
+    from board import square_from_uci
     rank, file = square_from_uci(uci)
     x, y = game.board.square_center(rank, file)
     return game.board.origin[0] + x, game.board.origin[1] + y
@@ -530,7 +530,7 @@ def test_playing_black_flips_the_board(app):
     feed(app, n.StateEvent(waiting()))
     feed(app, n.StateEvent(playing(AFTER_E4, 1, active="opp", last="e2e4")))
     game = app.scenes[-1]
-    from ..piece import PlayerColor
+    from piece import PlayerColor
     assert game.own_color == PlayerColor.BLACK and game.board.view_for == PlayerColor.BLACK and game.my_turn
     app.frame(0.016)
     shot(app, "game_black")
@@ -634,8 +634,8 @@ def test_every_screen_draws_at_every_size(app, size):
 
 
 def test_copy_id_copies_and_the_id_can_be_pasted_into_the_join_field(app, monkeypatch):
-    import clients.pychess.ui as ui
-    import clients.pychess.scenes.lobby as lobby_module
+    import ui as ui
+    import scenes.lobby as lobby_module
     store = {}
     monkeypatch.setattr(lobby_module, "clipboard_put", lambda text: store.update(text=text) or True)
     monkeypatch.setattr(ui, "clipboard_get", lambda: store["text"])
@@ -651,7 +651,16 @@ def test_copy_id_copies_and_the_id_can_be_pasted_into_the_join_field(app, monkey
     assert lobby.join_id.text == "s1"
 
 
-def test_copy_id_without_a_system_clipboard_still_works_inside_the_app(app):
+def test_copy_id_without_a_system_clipboard_still_works_inside_the_app(app, monkeypatch):
+    import ui
+    import scenes.lobby as lobby_module
+
+    def unavailable_clipboard(text):
+        ui._internal_clipboard = text
+        ui._system_clipboard_works = False
+        return False
+
+    monkeypatch.setattr(lobby_module, "clipboard_put", unavailable_clipboard)
     app.push(ConnectScene(app))
     feed(app, n.Connected("1.2"), n.Authed("me", "t"))
     lobby = app.scenes[-1]
