@@ -4,7 +4,7 @@ import socket
 import struct
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlsplit
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf import text_format
@@ -438,7 +438,7 @@ class NetworkClient:
                 self._log(f"disconnected: {reason}")
                 put(Disconnected(reason))
 
-        writer = threading.Thread(target=self._write_loop, args=(transport, outbox, reported), daemon=True)
+        writer = threading.Thread(target=self._write_loop, args=(transport, outbox, report), daemon=True)
         self._outbox, self._writer, self.transport = outbox, writer, transport
         writer.start()
         self._log("connected; sending ConnectRequest")
@@ -474,7 +474,7 @@ class NetworkClient:
             transport.close()  # finish the closing handshake, so the server is not left waiting for it
 
 
-    def _write_loop(self, transport: TcpTransport | WebSocketTransport, outbox: queue.Queue, report: Any) -> None:
+    def _write_loop(self, transport: TcpTransport | WebSocketTransport, outbox: queue.Queue, report: Callable[[str], None]) -> None:
         try:
             while True:
                 payload = outbox.get()
