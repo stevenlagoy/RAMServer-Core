@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - 'feature/20-interpreted-chess-client'
+      - 'python-chess'
+  pull_request:
+    branches:
+      - 'feature/20-interpreted-chess-client'
+      - 'python-chess'
+
+jobs:
+  python:
+    name: Python chess client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/pychess
+    env:
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: clients/pychess/requirements.txt
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+      - name: Generate protobuf modules for the Python client
+        run: buf generate
+        working-directory: ${{ github.workspace }}
+      - name: Run Python tests
+        run: python -m pytest tests

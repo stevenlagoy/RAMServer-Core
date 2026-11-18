@@ -1,2 +1,3 @@
-# ramserver-core
-RAMServer Core: a Reusable Authoritative Multiplayer game server core.
+# Pychess
+
+Pychess is a client implementation of chess written in Python for the RAMServer system.

@@ -1,4 +1,10 @@
 version: v2
+
+inputs:
+  - git_repo: https://github.com/stevenlagoy/RAMServer-Core.git
+    branch: main
+    subdir: proto
+
 plugins:
   - remote: buf.build/protocolbuffers/python
-    out: clients/chess/interpreted_client/gen
+    out: clients/pychess/gen
