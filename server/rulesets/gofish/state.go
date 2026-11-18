@@ -49,7 +49,40 @@ func (p PlayerOutsideView) Decode(encoded []byte) (PlayerOutsideView, int, error
 
 type Player struct {
 	PlayerOutsideView
-	hand []Card
+	hand []*Card
+}
+
+func (p Player) HeldRanks() []Rank {
+	ranks := make(map[Rank]struct{}) // Idiomatic way to make a set in Go
+	for _, card := range p.hand {
+		ranks[card.Rank] = struct{}{}
+	}
+	held := make([]Rank, len(ranks))
+	for rank := range ranks {
+		held = append(held, rank)
+	}
+	return held
+}
+
+func (p Player) ValidHeldBooks() []Rank {
+	// For each rank, count the number of held cards of that rank
+	heldsOfRanks := make(map[Rank]int, len(Ranks))
+	for _, rank := range Ranks {
+		heldsOfRanks[rank] = 0
+		for _, held := range p.hand {
+			if held.Rank == rank {
+				heldsOfRanks[rank]++
+			}
+		}
+	}
+	// Find any ranks of which four cards are held
+	books := []Rank{}
+	for rank, held := range heldsOfRanks {
+		if held >= 4 {
+			books = append(books, rank)
+		}
+	}
+	return books
 }
 
 // 5 or more bytes, byte 5 gives the number of bytes greater than 5
@@ -77,37 +110,79 @@ func (p Player) Decode(encoded []byte) (Player, int, error) {
 		if err != nil {
 			return Player{}, 0, err
 		}
-		p.hand = append(p.hand, card)
+		p.hand = append(p.hand, &card)
 		decoded++
 	}
 	return p, decoded, nil
 }
 
 type State struct {
-	players      []Player
-	turnNumber   int
-	cards        []Card
-	recentAction Action
+	players      []Player // All players of the game, in order of their turn order
+	turnNumber   int      // Total number of turns which have passed
+	cards        []Card   // Cards in the game, not modified during play
+	recentAction Action   // Most recent action completed before this state
 }
 
-func (s State) cardsInPool() []Card {
-	pool := make([]Card, len(s.cards))
+func (s State) cardsInPool() []*Card {
+	pool := make([]*Card, len(s.cards))
 	for _, card := range s.cards {
 		if card.Holder == nil {
-			pool = append(pool, card)
+			pool = append(pool, &card)
 		}
 	}
 	return pool
 }
 
-func (s State) CurrentTurn() string {
+func (s State) topOfPool() *Card {
+	if len(s.cardsInPool()) > 0 {
+		return s.cardsInPool()[0]
+	}
+	return nil
+}
+
+func (s State) CurrentTurn() *Player {
 	order := s.turnNumber % len(s.players)
 	for _, player := range s.players {
 		if player.order == order {
-			return player.id
+			return &player
 		}
 	}
 	panic("Current turn number is invalid")
+}
+
+// Return the player whose turn follows the current one. Requires that players are ordered by their
+// play order. Skips any players who hold no cards.
+func (s State) NextTurn() *Player {
+	order := s.turnNumber%len(s.players) + 1
+	for _, player := range s.players {
+		if player.order >= order && len(player.hand) > 0 {
+			return &player
+		}
+	}
+	panic("Current turn number is invalid")
+}
+
+func (s State) OpponentPlayersOf(player *Player) []*Player {
+	opponents := make([]*Player, len(s.players)-1)
+	for _, opponent := range s.players {
+		if opponent.id != player.id {
+			opponents = append(opponents, &opponent)
+		}
+	}
+	return opponents
+}
+
+func (s State) AllValidRequestsBy(player *Player) []CardRequest {
+	validRequests := make([]CardRequest, len(s.players)*player.handSize)
+	for _, opponent := range s.OpponentPlayersOf(player) {
+		if opponent.handSize <= 0 { // They don't have any cards to request
+			continue
+		}
+		for _, rank := range player.HeldRanks() {
+			validRequests = append(validRequests, CardRequest{from: player, to: opponent, rank: rank})
+		}
+	}
+	return validRequests
 }
 
 type View struct {

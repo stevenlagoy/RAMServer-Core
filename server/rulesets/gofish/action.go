@@ -7,6 +7,7 @@ import (
 type Action interface {
 	From() *Player
 	To() *Player
+	Encode() []byte
 }
 
 /*
@@ -46,7 +47,7 @@ Respond to a request:
 type CardResponse struct {
 	from  *Player
 	to    *Player
-	cards []Card
+	cards []*Card
 }
 
 func (a CardResponse) From() *Player {
@@ -67,6 +68,31 @@ func (a CardResponse) Encode() []byte {
 		cards = append(cards, card.Encode())
 	}
 	return append([]byte{from, to, numCards}, cards...)
+}
+
+type CardResponseAndTopUp struct {
+	CardResponse
+	TopUpFromPool
+}
+
+func (a CardResponseAndTopUp) From() *Player {
+	return a.CardResponse.from
+}
+
+func (a CardResponseAndTopUp) To() *Player {
+	return a.CardResponse.to
+}
+
+func (a CardResponseAndTopUp) Encode() []byte {
+	from := uint8(a.CardResponse.from.order)
+	to := uint8(a.CardResponse.to.order)
+	cardDrawn := a.card.Encode()
+	numCards := uint8(len(a.cards))
+	cards := make([]uint8, len(a.cards))
+	for _, card := range a.cards {
+		cards = append(cards, card.Encode())
+	}
+	return append([]byte{from, to, cardDrawn, numCards}, cards...)
 }
 
 /*
@@ -103,7 +129,7 @@ Take a card from the pool:
 */
 type DrawFromPool struct {
 	from *Player
-	card Card
+	card *Card
 }
 
 func (a DrawFromPool) From() *Player {
@@ -121,9 +147,35 @@ func (a DrawFromPool) Encode() []byte {
 	return []byte{player, player, card}
 }
 
-type EndTurn struct {
+/*
+Take a card from the pool:
+
+	If hold no cards, draw top card from the pool.
+*/
+type TopUpFromPool struct {
 	from *Player
-	to   *Player // Next player in order
+	card *Card
+}
+
+func (a TopUpFromPool) From() *Player {
+	return a.from
+}
+
+func (a TopUpFromPool) To() *Player {
+	return a.from
+}
+
+// 3 bytes: player order, player order (padding), card drawn
+func (a TopUpFromPool) Encode() []byte {
+	player := uint8(a.from.order)
+	card := a.card.Encode()
+	return []byte{player, player, card}
+}
+
+type EndTurn struct {
+	from     *Player
+	to       *Player // Next player in order
+	newOrder int
 }
 
 func (a EndTurn) From() *Player {
@@ -134,7 +186,14 @@ func (a EndTurn) To() *Player {
 	return a.to
 }
 
+// 3 bytes: from player order, to player order, new order value
+func (a EndTurn) Encode() []byte {
+	from := uint8(a.from.order)
+	to := uint8(a.to.order)
+	return []byte{from, to, uint8(a.newOrder)}
+}
+
 func DecodeAction(encoded []byte) (Action, int, error) {
 	// TODO
-	return DrawFromPool{nil, Card{}}, 0, fmt.Errorf("not yet implemented")
+	return DrawFromPool{nil, &Card{}}, 0, fmt.Errorf("not yet implemented")
 }

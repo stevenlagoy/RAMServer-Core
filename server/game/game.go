@@ -44,7 +44,7 @@ type Game interface {
 
 	// Reports whether state is a finished match, and how it ended if so. Should
 	// return false as long as play is continuing.
-	Outcome(state GameState) (result MatchResult, ok bool)
+	Outcome(state GameState) (result MatchResult, complete bool)
 
 	// Reports whether a lobby may begin a match, given its roster and each member's
 	// ready flag. May depend on number of players present, number ready to start,
