@@ -1,159 +1,61 @@
-# RAMServer Core
+# [Client Name]
 
-A Reusable Authoritative Multiplayer game server core. Game-agnostic server owns the game state and clients submit actions as requests.
+[Client Name] is a client created by [creators] with [technologies] for [games].
 
-**Project:** Reusable Authoritative Multiplayer Server Core (RAMServer)
+### Creators
 
-**Course:** CS 56000 Software Engineering
+This client was created by [creator(s) of the client].
 
-**Term:** Fall 2026
+May describe the roles and responsibilities of each creator.
 
-#### Team:
-- Heffelmire, Jacob : [heffjl03@pfw.edu](mailto:heffjl03@pfw.edu) / [jlheffelmire@gmail.com](mailto:jlheffelmire@gmail.com)
-- Jones, Hayden : [jonehm05@pfw.edu](mailto:jonehm05@pfw.edu) / [jonehayhayd@gmail.com](mailto:jonehayhayd@gmail.com)
-- LaGoy, Steven : [lagosm01@pfw.edu](mailto:lagosm01@pfw.edu) / [stevenlagoy@gmail.com](mailto:stevenlagoy@gmail.com)
-- Mao, Aidan : [maoal01@pfw.edu](mailto:maoal01@pfw.edu) / [aidanmao2005@gmail.com](mailto:aidanmao2005@gmail.com)
+Include an AI use disclosure describing what AI models were used, and how they contributed to creating the client.
 
-## Repository Layout
+### Games
 
-| Path                                | Contents                                                             |
-|-------------------------------------|----------------------------------------------------------------------|
-| `proto/`                            | Wire protocol definitions (source of truth)                          |
-| `server/cmd/ramserver/`             | Primary server entry point. Run with `go run ./...`                  |
-| `server/cmd/leanclient/`            | Lightweight test client implementation. Run with `go run ./...`      |
-| `server/internal/`                  | Go server code (`github.com/stevenlagoy/ramserver-core/server`)      |
-| `server/game/`                      | Game interface for any ruleset running on RAMServer-Core             |
-| `server/rulesets/`                  | Implementations of the Game interface                                |
-| `server/rulesets/chess/`            | Ruleset for chess implementing the Game interface                    |
-| `clients/chess/compiled_client/`    | Compiled-language chess client implementation in Java and Kotlin     |
-| `clients/chess/interpreted_client/` | Interpreted-language chess client implementation in Python           |
-| `clients/gofish/systems_client/`    | Systems-language Go Fish client implementation in C and C++          |
-| `clients/gofish/web_client/`        | Web-based Go Fish client implementation in JavaScript and TypeScript |
-| `clients/tictactoe/client/`         | Tic-Tac-Toe client implementation by an LLM                          |
-| `docs/`                             | Team documentation for project management and communication          |
-| `scripts/`                          | Developer convenience scripts                                        |
+This client can play [game(s) this client may play].
 
-## Prerequisites
+### Technologies
 
-Install these before doing anything else
+Technology used to create the client, can be divided between tools, languages, other technology, etc.
 
-| Tool           | Version | Needed for            |
-|----------------|---------|-----------------------|
-| Go             | 1.24+   | Server                |
-| Docker Desktop | current | Running the server    |
-| Git            | 2.40+   | Everything            |
-| buf            | 1.4x    | Regenerating protobuf |
+## How To Use
 
-Install `buf` (works on all three platforms, requires Go):
+Include steps for running the client for each supported OS. Clients should be usable on Linux, MacOS, and Windows (with cmd or PowerShell).
 
-```
-go install github.com/bufbuild/buf/cmd/buf@latest
-```
+### Requirements
 
-If `buf` is not found afterward, add Go's bin directory to your Path:
+What requirements must users fulfil before running commands or scripts?
 
-- **Linux / macOS**: `export PATH="$PATH:$(go env GOPATH)/bin"` in your shell profile
-- **Windows**: add `%USERPROFILE%\go\bin` to your PATH environment variable
+### Execution
 
-## Getting started
+What commands or scripts are used to run the client?
 
-### 1. Clone and enter the repository
+### Connection
 
-**Linux / macOS (bash)**
-```bash
-git clone https://github.com/stevenlagoy/ramserver-core.git
-cd ramserver-core
-```
+What steps are needed to create a connection to a local server, or to the hosted server?
 
-### 2. Generate protobuf code
+What steps are needed to create or join a session for the desired game?
 
-Generated code is not committed. Run this after cloning and after any change to files under `proto/`. The command is identical on all platforms:
+What steps are needed to indicate readiness to start a match?
 
-```
-buf generate
-```
+### Play
 
-### 3. Run the server
+How can players submit actions during play?
 
-Identical on all platforms:
+How do players know what actions may be submitted?
 
-```
-docker compose up --build
-```
+How are other players' actions displayed?
 
-The server listens on `localhost:9000`. Stop it with `Ctrl+C` and remove the container with `docker compose down`.
+### Disconnection and Shutdown
 
-### 4. Run the server without Docker (faster iteration)
+What steps are needed to leave a session?
 
-**Linux / macOS (bash)**
-```bash
-cd server
-go run ./cmd/ramserver --addr :9000
-```
+What steps are needed to disconnect from the server?
 
-**Windows (cmd)**
-```cmd
-cd server
-go run .\cmd\ramserver --addr :9000
-```
+How can the client be shut down?
 
-### 5. Run the tests
+## Features
 
-**Linux / macOS (bash)**
-```bash
-cd server
-go test -race ./...
-```
+This is a place to describe the special features about the client, and any other interesting information you'd like to include in the README.
 
-**Windows (PowerShell / cmd)**
-```cmd
-cd server
-go test -race ./...
-```
-
-`-race` requires a C toolchain on Windows. If it fails, drop the flag locally; CI runs the race detector on every pull request regardless.
-
-## Convenience scripts
-
-**Linux / macOS (bash)**
-```bash
-./scripts/dev.sh generate # regenerate protobuf
-./scripts/dev.sh test     # run server tests
-./scripts/dev.sh up       # build and start the server in Docker
-./scripts/leanclients.sh 3 # open 3 leanclients in one tmux window (needs tmux)
-```
-
-`leanclients.sh [count] [leanclient flags...]` opens one pane per client, named Player1 to PlayerN, and passes any extra flags (such as `-addr`) to every client. Close them all with `tmux kill-session -t leanclients`. The server allows 4 connections per IP address by default (`MaxConnectionsOneIP`), so more than 4 local clients are refused.
-
-**Windows (PowerShell)**
-```powershell
-.\scripts\dev.ps1 generate # regenerate protobuf
-.\scripts\dev.ps1 test     # run server tests
-.\scripts\dev.ps1 up       # build and start the server in Docker
-.\scripts\leanclients.ps1  # open 3 leanclients in one Windows Terminal window (needs wt.exe)
-```
-
-If PowerShell blocks any script, run:
-`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
-
-`leanclients.ps1 [count] [leanclient flags...]` opens one pane per client, named Player1 to PlayerN, and passes any extra flags (such as `-addr`) to every client. The server allows 4 connections per IP address by default (`MaxConnectionsOneIP`), so more than 4 local clients are refused.
-
-## Branches
-
-| Branch     | Owners   | Scope                           |
-|------------|----------|---------------------------------|
-| `main`     | All four | Protected; requires 4 approvals |
-| `server`   | All four | `server/`, `proto/`             |
-| `client-1` | Pair TBD | `clients/client-1/`             |
-| `client-2` | Pair TBD | `clients/client-2/`             |
-
-Rebase your branch onto `main` before opening a pull request.
-
-## Documentation
-
-- [Wire protocol specification](docs/protocol.md)
-- [Contributing guidelines](CONTRIBUTING.md)
-- [Project Proposal](docs/PROJECT-PROPOSAL.md)
-- [Team Policies](docs/TEAM-POLICIES.md)
-- [Requirements Specification](docs/REQUIREMENTS-SPECIFICATION.md)
-- [Chess Ruleset](server/rulesets/chess/README.md)
+You can expand the document below this point with other sections and content of your choice.
