@@ -57,7 +57,7 @@ func (p Player) HeldRanks() []Rank {
 	for _, card := range p.hand {
 		ranks[card.Rank] = struct{}{}
 	}
-	held := make([]Rank, len(ranks))
+	held := make([]Rank, 0, len(ranks))
 	for rank := range ranks {
 		held = append(held, rank)
 	}
@@ -87,7 +87,7 @@ func (p Player) ValidHeldBooks() []Rank {
 
 // 5 or more bytes, byte 5 gives the number of bytes greater than 5
 func (p Player) Encode() []byte {
-	encodedHand := make([]uint8, p.handSize)
+	encodedHand := make([]uint8, 0, p.handSize)
 	for _, card := range p.hand {
 		encodedHand = append(encodedHand, card.Encode())
 	}
@@ -124,7 +124,7 @@ type State struct {
 }
 
 func (s State) cardsInPool() []*Card {
-	pool := make([]*Card, len(s.cards))
+	pool := make([]*Card, 0, len(s.cards))
 	for _, card := range s.cards {
 		if card.Holder == nil {
 			pool = append(pool, &card)
@@ -163,7 +163,7 @@ func (s State) NextTurn() *Player {
 }
 
 func (s State) OpponentPlayersOf(player *Player) []*Player {
-	opponents := make([]*Player, len(s.players)-1)
+	opponents := make([]*Player, 0, len(s.players)-1)
 	for _, opponent := range s.players {
 		if opponent.id != player.id {
 			opponents = append(opponents, &opponent)
@@ -173,7 +173,7 @@ func (s State) OpponentPlayersOf(player *Player) []*Player {
 }
 
 func (s State) AllValidRequestsBy(player *Player) []CardRequest {
-	validRequests := make([]CardRequest, len(s.players)*player.handSize)
+	validRequests := make([]CardRequest, 0, len(s.players)*player.handSize)
 	for _, opponent := range s.OpponentPlayersOf(player) {
 		if opponent.handSize <= 0 { // They don't have any cards to request
 			continue
@@ -195,7 +195,7 @@ type View struct {
 
 func (s State) viewFor(playerID string) (View, error) {
 	self := (*Player)(nil)
-	playerViews := make([]PlayerOutsideView, len(s.players))
+	playerViews := make([]PlayerOutsideView, 0, len(s.players))
 	for _, player := range s.players {
 		if player.id == playerID {
 			self = &player
@@ -240,13 +240,16 @@ recent action (3 or more bytes)
 func (v View) Encode() []byte {
 	encodedSelf := v.self.Encode()
 	numPlayers := uint8(len(v.players))
-	encodedPlayers := make([]byte, len(v.players)*4)
+	encodedPlayers := make([]byte, 0, len(v.players)*4)
 	for _, player := range v.players {
 		encodedPlayers = append(encodedPlayers, player.Encode()...)
 	}
 	turnNumber := uint8(v.turnNumber)
 	poolSize := uint8(v.poolSize)
-	recentAction := v.recentAction.Encode()
+	var recentAction []byte
+	if v.recentAction != nil {
+		recentAction = v.recentAction.Encode()
+	}
 	encoded := []byte{}
 	encoded = append(encoded, encodedSelf...)
 	encoded = append(encoded, numPlayers)

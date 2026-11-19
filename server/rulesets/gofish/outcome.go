@@ -23,7 +23,7 @@ func (o Outcome) GetWinners() []*Player {
 
 func (o Outcome) GetWinnerIDs() []string {
 	winners := o.GetWinners()
-	winnerIDs := make([]string, len(winners))
+	winnerIDs := make([]string, 0, len(winners))
 	for _, winner := range winners {
 		winnerIDs = append(winnerIDs, winner.id)
 	}
