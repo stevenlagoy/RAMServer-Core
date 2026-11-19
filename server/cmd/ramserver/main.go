@@ -12,6 +12,7 @@ import (
 	"github.com/stevenlagoy/ramserver-core/server/internal/server"
 	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 	"github.com/stevenlagoy/ramserver-core/server/rulesets/chess"
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/gofish"
 )
 
 const defaultAddr = "127.0.0.1:9000"
@@ -34,6 +35,7 @@ func main() {
 	defer stop()
 	games := game.NewRegistry()
 	games.Register("chess", func() game.Game { return &chess.Game{} })
+	games.Register("gofish", func() game.Game { return &gofish.Game{} })
 	if os.Getenv("RAMSERVER_STUB_GAME") != "" {
 		games.Register("stub", func() game.Game { return &StubGame.StubGame{} }) // for manual testing with leanclient
 	}
