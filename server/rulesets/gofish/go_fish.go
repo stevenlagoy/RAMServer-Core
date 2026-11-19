@@ -1,6 +1,7 @@
 package gofish
 
 import (
+	"bytes"
 	"fmt"
 	"slices"
 
@@ -17,143 +18,178 @@ const RoleDealer = "Dealer"
 
 func (g *Game) Roles() []game.RoleSpec {
 	return []game.RoleSpec{
-		{Name: game.RolePlayer, Min: 2, Max: 0},    // Unlimited
+		{Name: game.RolePlayer, Min: 2, Max: 5},
 		{Name: RoleDealer, Min: 1, Max: 1},         // Dealers act like players most of the time
 		{Name: game.RoleSpectator, Min: 0, Max: 0}, // Optional, Unlimited
 	}
 }
 
 func (g *Game) NewState(order []string, roles map[string]game.Role) game.GameState {
-	players := make([]Player, len(order))
+	players := make([]Player, 0, len(order))
 	for order, id := range order {
 		if roles[id] != game.RoleSpectator {
 			players = append(players, Player{PlayerOutsideView{id, 0, []Book{}, order}, []*Card{}})
 		}
 	}
-	if len(players) < 3 {
-		panic(fmt.Sprintf("gofish: NewState needs 3 players, got %d", len(players)))
+	if len(players) < 3 || len(players) > 6 {
+		panic(fmt.Sprintf("gofish: NewState needs 2 to 5 players and one dealer, got %d participants", len(players)))
 	}
+	cards := makeCards()
 	return State{
 		players,
 		0,
-		makeCards(),
+		cards,
 		nil,
 	}
 }
 
 func (g *Game) Validate(s game.GameState, a game.Action) error {
 	state := s.(State)
-	// Require that action is present in LegalActions
 	for _, legal := range g.LegalActions(state, a.ActorID) {
-		for i, b := range a.Payload {
-			if legal.Payload[i] != b {
-				return fmt.Errorf("could not validate an action")
-			}
+		if bytes.Equal(legal.Payload, a.Payload) {
+			return nil
 		}
 	}
-	return nil
+	return fmt.Errorf("could not validate an action")
 }
 
 func (g *Game) Apply(s game.GameState, a game.Action) game.GameState {
 	state := s.(State)
 	decoded, _, err := DecodeAction(a.Payload)
 	if err != nil {
-		return State{
-			state.players,
-			state.turnNumber,
-			state.cards,
-			state.recentAction,
-		}
+		return state
 	}
+	next := state.clone()
+	decoded = next.bindAction(decoded)
 	switch action := decoded.(type) {
 	case CardRequest:
-		// No changes
-		return State{
-			state.players,
-			state.turnNumber,
-			state.cards,
-			action,
-		}
+		next.recentAction = action
+	case DealCards:
+		next.deal()
+		next.recentAction = action
 	case CardResponse:
-		for _, card := range action.cards {
-			// Remove the cards from the requestee's hand
-			action.from.hand = slices.DeleteFunc(
-				action.from.hand,
-				func(c *Card) bool {
-					return c.symbol() == card.symbol()
-				},
-			)
-			// Add the cards to the requester's hand
-			action.to.hand = append(action.to.hand, card)
-		}
-		return State{
-			state.players,
-			state.turnNumber,
-			state.cards,
-			action,
-		}
+		next.transfer(action.from, action.to, action.cards)
+		next.recentAction = action
 	case CardResponseAndTopUp:
-		// Remove the pool card from the pool
-		// Add the pool card to the requestee's hand
-
-		for _, card := range action.cards {
-			// Remove the cards from the requestee's hand
-			action.From().hand = slices.DeleteFunc(
-				action.From().hand,
-				func(c *Card) bool {
-					return c.symbol() == card.symbol()
-				},
-			)
-			// Add the cards to the requester's hand
-			action.to.hand = append(action.to.hand, card)
-		}
-		return State{
-			state.players,
-			state.turnNumber,
-			state.cards,
-			action,
-		}
+		next.transfer(action.CardResponse.from, action.CardResponse.to, action.cards)
+		next.draw(action.TopUpFromPool.from, action.card)
+		next.recentAction = action
 	case DrawFromPool:
-		// Remove the card from the pool
-		// Add the card to the drawer's hand
-		action.From().hand = append(action.From().hand, action.card)
-		return State{
-			state.players,
-			state.turnNumber,
-			state.cards,
-			action,
-		}
+		next.draw(action.from, action.card)
+		next.recentAction = action
+	case TopUpFromPool:
+		next.draw(action.from, action.card)
+		next.recentAction = action
 	case PlaceBook:
-		// Remove the cards from the placer's hand
 		action.from.hand = slices.DeleteFunc(
 			action.from.hand,
 			func(c *Card) bool {
 				return c.Rank == action.rank
 			},
 		)
-		// Add the book to the placer's books
+		action.from.handSize = len(action.from.hand)
 		action.from.books = append(action.from.books, Book{action.rank, action.from.PlayerOutsideView})
-		return State{
-			state.players,
-			state.turnNumber,
-			state.cards,
-			action,
-		}
+		next.recentAction = action
 	case EndTurn:
-		// Increment turnNumber
-		return State{
-			state.players,
-			state.turnNumber + 1,
-			state.cards,
-			action,
+		next.turnNumber++
+		next.recentAction = action
+	}
+	return next
+}
+
+func (s State) clone() State {
+	players := append([]Player(nil), s.players...)
+	for i := range players {
+		players[i].hand = append([]*Card(nil), s.players[i].hand...)
+		players[i].books = append([]Book(nil), s.players[i].books...)
+	}
+	return State{
+		players:      players,
+		turnNumber:   s.turnNumber,
+		cards:        append([]Card(nil), s.cards...),
+		recentAction: s.recentAction,
+	}
+}
+
+func (s State) bindAction(action Action) Action {
+	player := func(order int) *Player {
+		for i := range s.players {
+			if s.players[i].order == order {
+				return &s.players[i]
+			}
+		}
+		return &Player{PlayerOutsideView: PlayerOutsideView{order: order}}
+	}
+	switch a := action.(type) {
+	case CardRequest:
+		a.from, a.to = player(a.from.order), player(a.to.order)
+		return a
+	case CardResponse:
+		a.from, a.to = player(a.from.order), player(a.to.order)
+		return a
+	case CardResponseAndTopUp:
+		a.CardResponse.from, a.CardResponse.to = player(a.CardResponse.from.order), player(a.CardResponse.to.order)
+		a.TopUpFromPool.from = a.CardResponse.from
+		return a
+	case PlaceBook:
+		a.from = player(a.from.order)
+		return a
+	case DrawFromPool:
+		a.from = player(a.from.order)
+		return a
+	case TopUpFromPool:
+		a.from = player(a.from.order)
+		return a
+	case EndTurn:
+		a.from, a.to = player(a.from.order), player(a.to.order)
+		return a
+	case DealCards:
+		a.dealer, a.first = player(a.dealer.order), player(a.first.order)
+		return a
+	default:
+		return action
+	}
+}
+
+func (s *State) deal() {
+	players := s.players[:len(s.players)-1]
+	perPlayer := 5
+	if len(players) <= 3 {
+		perPlayer = 7
+	}
+	cardIndex := 0
+	for round := 0; round < perPlayer; round++ {
+		for i := range players {
+			card := &s.cards[cardIndex]
+			card.Holder = &players[i]
+			players[i].hand = append(players[i].hand, card)
+			players[i].handSize = len(players[i].hand)
+			cardIndex++
 		}
 	}
-	// Unreachable
-	return State{
-		state.players,
-		state.turnNumber,
-		state.cards,
-		state.recentAction,
+}
+
+func (s *State) transfer(from, to *Player, requested []*Card) {
+	for _, wanted := range requested {
+		for i, held := range from.hand {
+			if held.symbol() == wanted.symbol() {
+				from.hand = append(from.hand[:i], from.hand[i+1:]...)
+				to.hand = append(to.hand, held)
+				break
+			}
+		}
+	}
+	from.handSize, to.handSize = len(from.hand), len(to.hand)
+}
+
+func (s *State) draw(player *Player, wanted *Card) {
+	for i := range s.cards {
+		if s.cards[i].Holder == nil && s.cards[i].symbol() == wanted.symbol() {
+			s.cards[i].Holder = player
+			player.hand = append(player.hand, &s.cards[i])
+			player.handSize = len(player.hand)
+			return
+		}
 	}
 }
 
@@ -162,21 +198,31 @@ func (g *Game) AllowsOutOfTurn(_ game.GameState, a game.Action) bool {
 }
 
 func (g *Game) ActiveTurn(s game.GameState) []string {
-	return []string{s.(State).recentAction.To().id}
+	state := s.(State)
+	if state.recentAction == nil {
+		return []string{state.players[len(state.players)-1].id}
+	}
+	return []string{state.recentAction.To().id}
 }
 
 func (g *Game) ReadyToStart(roster map[string]game.Role, ready map[string]bool) bool {
 	players := 0
+	dealers := 0
 	for id, role := range roster {
 		if role == game.RoleSpectator {
 			continue // spectators do not block starting the game
-		} // Role is Player or Dealer
+		}
 		if !ready[id] {
 			return false
 		}
-		players++
+		switch role {
+		case game.RolePlayer:
+			players++
+		case RoleDealer:
+			dealers++
+		}
 	}
-	return players == 2
+	return players >= 2 && players <= 5 && dealers == 1
 }
 
 func (g *Game) Outcome(s game.GameState) (result game.MatchResult, complete bool) {
@@ -232,10 +278,23 @@ A player may:
 */
 func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec {
 	state := s.(State)
-	if state.CurrentTurn().id != playerID {
-		return []game.ActionSpec{} // No actions are allowed out-of-turn
-	} // It is this player's active turn
+	if state.recentAction == nil {
+		dealer := state.players[len(state.players)-1]
+		if dealer.id != playerID {
+			return []game.ActionSpec{}
+		}
+		return []game.ActionSpec{{
+			Payload:     (DealCards{dealer: &dealer, first: &state.players[0]}).Encode(),
+			Description: "Deal cards",
+		}}
+	}
 	player := state.CurrentTurn()
+	if state.recentAction != nil {
+		player = state.recentAction.To()
+	}
+	if player.id != playerID {
+		return []game.ActionSpec{} // No actions are allowed out-of-turn
+	}
 	switch action := state.recentAction.(type) {
 	case CardRequest: // Have been requested for cards
 		// Determine if player holds any requested cards
@@ -282,7 +341,7 @@ func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec
 		if len(resp.cards) > 0 { // The response contains cards
 			// Must request cards again from another player
 			possibleRequests := state.AllValidRequestsBy(player)
-			legals := make([]game.ActionSpec, len(possibleRequests))
+			legals := make([]game.ActionSpec, 0, len(possibleRequests))
 			for _, request := range possibleRequests {
 				legals = append(legals, game.ActionSpec{
 					Payload:     request.Encode(),
@@ -332,10 +391,10 @@ func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec
 			Payload:     EndTurn{player, state.NextTurn(), state.turnNumber + 1}.Encode(),
 			Description: "End your turn",
 		}}
-	case EndTurn, nil: // True turn, or the start of the game
+	case DealCards, EndTurn: // True turn after dealing, or the start of a new turn
 		// Must request cards from another player with cards
 		possibleRequests := state.AllValidRequestsBy(player)
-		legals := make([]game.ActionSpec, len(possibleRequests))
+		legals := make([]game.ActionSpec, 0, len(possibleRequests))
 		for _, request := range possibleRequests {
 			legals = append(legals, game.ActionSpec{
 				Payload:     request.Encode(),
