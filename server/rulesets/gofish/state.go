@@ -10,6 +10,24 @@ type Encodable[T any] interface {
 	Decode([]byte) (T, int, error)
 }
 
+func (s State) playerByID(id string) (*Player, bool) {
+	for i := range s.players {
+		if s.players[i].id == id {
+			return &s.players[i], true
+		}
+	}
+	return nil, false
+}
+
+func (s State) playerByOrder(order int) *Player {
+	for i := range s.players {
+		if s.players[i].order == order {
+			return &s.players[i]
+		}
+	}
+	return nil
+}
+
 type PlayerOutsideView struct {
 	id       string
 	handSize int // Number of held cards
@@ -36,11 +54,11 @@ func (p PlayerOutsideView) Decode(encoded []byte) (PlayerOutsideView, int, error
 	}
 	p.order = int(encoded[0])
 	p.handSize = int(encoded[1])
-	books := binary.BigEndian.Uint16(encoded[3:4])
-	for i := 0; i < 16; i++ {
+	books := binary.BigEndian.Uint16(encoded[2:4])
+	for i := 0; i < 13; i++ {
 		bit := (books >> i) & 1
 		if bit == 1 {
-			rank := RankFromValue[i]
+			rank := RankFromValue[i+1]
 			p.books = append(p.books, Book{rank, p})
 		}
 	}
@@ -85,7 +103,7 @@ func (p Player) ValidHeldBooks() []Rank {
 	return books
 }
 
-// 5 or more bytes, byte 5 gives the number of bytes greater than 5
+// 4 or more bytes: 4-byte public view followed by one byte per held card.
 func (p Player) Encode() []byte {
 	encodedHand := make([]uint8, 0, p.handSize)
 	for _, card := range p.hand {
@@ -95,18 +113,19 @@ func (p Player) Encode() []byte {
 }
 
 func (p Player) Decode(encoded []byte) (Player, int, error) {
-	if len(encoded) < 5 {
+	if len(encoded) < 4 {
 		return Player{}, 0, fmt.Errorf("incorrect length for encoded Player: %d", len(encoded))
 	}
-	_, decoded, err := p.PlayerOutsideView.Decode(encoded)
+	outside, decoded, err := p.PlayerOutsideView.Decode(encoded)
 	if err != nil {
 		return Player{}, 0, err
 	}
-	if len(encoded) != 5+p.handSize {
-		return Player{}, 0, fmt.Errorf("incorrect length for encoded Player with hand size %d: %d", p.handSize, len(encoded))
+	p.PlayerOutsideView = outside
+	if len(encoded)-decoded < p.handSize {
+		return Player{}, 0, fmt.Errorf("incorrect length for encoded Player with hand size %d: %d", p.handSize, len(encoded)-decoded)
 	}
 	for i := range p.handSize {
-		card, err := DecodeCard([]byte{encoded[i+5]})
+		card, err := DecodeCard([]byte{encoded[i+4]})
 		if err != nil {
 			return Player{}, 0, err
 		}
@@ -266,10 +285,16 @@ func (v View) Decode(encoded []byte) (View, int, error) {
 		return View{}, 0, err
 	}
 	v.self = self
+	if decoded >= len(encoded) {
+		return View{}, 0, fmt.Errorf("missing player count in encoded view")
+	}
 	numPlayers := int(encoded[decoded]) // 1 byte
 	decoded++
-	v.players = make([]PlayerOutsideView, numPlayers)
+	v.players = make([]PlayerOutsideView, 0, numPlayers)
 	for range numPlayers {
+		if decoded >= len(encoded) {
+			return View{}, 0, fmt.Errorf("missing player data in encoded view")
+		}
 		player, pDecoded, err := PlayerOutsideView{}.Decode(encoded[decoded:])
 		if err != nil {
 			return View{}, 0, err
@@ -277,10 +302,20 @@ func (v View) Decode(encoded []byte) (View, int, error) {
 		v.players = append(v.players, player)
 		decoded += pDecoded
 	}
+	if decoded+2 > len(encoded) {
+		return View{}, 0, fmt.Errorf("missing turn and pool data in encoded view")
+	}
 	v.turnNumber = int(encoded[decoded]) // 1 byte
 	decoded++
 	v.poolSize = int(encoded[decoded]) // 1 byte
 	decoded++
-	// TODO recentAction
+	if decoded < len(encoded) {
+		action, consumed, err := DecodeAction(encoded[decoded:])
+		if err != nil {
+			return View{}, 0, err
+		}
+		v.recentAction = action
+		decoded += consumed
+	}
 	return v, decoded, nil
 }
