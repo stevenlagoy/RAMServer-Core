@@ -96,15 +96,18 @@ func DecodeCard(encoded []byte) (Card, error) {
 		return Card{}, fmt.Errorf("incorrect length for encoded card: %d", len(encoded))
 	}
 	value := encoded[0]
-	rankValue := value % 13
-	rank := RankFromValue[int(rankValue)]
-	suitValue := value - rankValue
+	if value == 0 || value > 52 {
+		return Card{}, fmt.Errorf("invalid encoded card: %d", value)
+	}
+	rankValue := int((value-1)%13) + 1
+	rank := RankFromValue[rankValue]
+	suitValue := int(value-1) / 13 * 13
 	suit := SuitFromValue[int(suitValue)]
 	return Card{suit, rank, nil}, nil
 }
 
 func makeCards() []Card {
-	cards := make([]Card, len(Suits)*len(Ranks))
+	cards := make([]Card, 0, len(Suits)*len(Ranks))
 	for _, suit := range Suits {
 		for _, rank := range Ranks {
 			cards = append(cards, Card{suit, rank, nil})
