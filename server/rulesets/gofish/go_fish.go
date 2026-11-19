@@ -45,8 +45,12 @@ func (g *Game) NewState(order []string, roles map[string]game.Role) game.GameSta
 
 func (g *Game) Validate(s game.GameState, a game.Action) error {
 	state := s.(State)
+	normalized, err := state.decodeClientAction(a.ActorID, a.Payload)
+	if err != nil {
+		return err
+	}
 	for _, legal := range g.LegalActions(state, a.ActorID) {
-		if bytes.Equal(legal.Payload, a.Payload) {
+		if bytes.Equal(legal.Payload, normalized.Encode()) {
 			return nil
 		}
 	}
@@ -55,7 +59,7 @@ func (g *Game) Validate(s game.GameState, a game.Action) error {
 
 func (g *Game) Apply(s game.GameState, a game.Action) game.GameState {
 	state := s.(State)
-	decoded, _, err := DecodeAction(a.Payload)
+	decoded, err := state.decodeClientAction(a.ActorID, a.Payload)
 	if err != nil {
 		return state
 	}
@@ -95,6 +99,14 @@ func (g *Game) Apply(s game.GameState, a game.Action) game.GameState {
 		next.recentAction = action
 	}
 	return next
+}
+
+func (s State) decodeClientAction(actorID string, payload []byte) (Action, error) {
+	decoded, consumed, err := DecodeAction(payload)
+	if err == nil && consumed == len(payload) {
+		return decoded, nil
+	}
+	return ParseTextAction(s, actorID, payload)
 }
 
 func (s State) clone() State {
@@ -152,9 +164,9 @@ func (s State) bindAction(action Action) Action {
 }
 
 func (s *State) deal() {
-	players := s.players[:len(s.players)-1]
+	players := s.players
 	perPlayer := 5
-	if len(players) <= 3 {
+	if len(players) <= 4 {
 		perPlayer = 7
 	}
 	cardIndex := 0
@@ -306,13 +318,13 @@ func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec
 		}
 		if len(cards) == 0 { // Do we have any requested cards?
 			// Go fish!
-			return []game.ActionSpec{game.ActionSpec{
+			return []game.ActionSpec{{
 				Payload:     CardResponse{player, action.from, []*Card{}}.Encode(),
 				Description: fmt.Sprintf("Tell Player %d to Go Fish!", action.from.order+1),
 			}}
 		} // We have a requested card
 		if len(player.hand) == len(cards) { // There would be no cards left after responding to the request
-			return []game.ActionSpec{game.ActionSpec{
+			return []game.ActionSpec{{
 				Payload: CardResponseAndTopUp{
 					CardResponse{player, action.from, cards},
 					TopUpFromPool{player, state.topOfPool()},
@@ -323,7 +335,7 @@ func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec
 				),
 			}}
 		} // Have more cards than were requested
-		return []game.ActionSpec{game.ActionSpec{
+		return []game.ActionSpec{{
 			Payload: CardResponse{player, action.from, cards}.Encode(),
 			Description: fmt.Sprintf(
 				"Send the requested %s to Player %d",
@@ -351,7 +363,7 @@ func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec
 			return legals
 		} else { // Go Fish!
 			// Draw from pool
-			return []game.ActionSpec{game.ActionSpec{
+			return []game.ActionSpec{{
 				Payload:     DrawFromPool{player, state.topOfPool()}.Encode(),
 				Description: "Draw a card from the pool",
 			}}
@@ -360,20 +372,20 @@ func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec
 		heldBooks := player.ValidHeldBooks()
 		if len(heldBooks) > 0 { // Any valid held books?
 			// Must place a book
-			return []game.ActionSpec{game.ActionSpec{
+			return []game.ActionSpec{{
 				Payload:     PlaceBook{player, heldBooks[0]}.Encode(),
 				Description: "Place a book of " + heldBooks[0].plural,
 			}}
 		} // No valid held books
 		// End turn
-		return []game.ActionSpec{game.ActionSpec{
+		return []game.ActionSpec{{
 			Payload:     EndTurn{player, state.NextTurn(), state.turnNumber + 1}.Encode(),
 			Description: "End your turn",
 		}}
 	case PlaceBook:
 		if len(player.hand) == 0 { // Is our hand empty?
 			// Top up from pool
-			return []game.ActionSpec{game.ActionSpec{
+			return []game.ActionSpec{{
 				Payload:     TopUpFromPool{player, state.topOfPool()}.Encode(),
 				Description: "Draw a card from the pool",
 			}}
@@ -381,13 +393,13 @@ func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec
 		heldBooks := player.ValidHeldBooks()
 		if len(heldBooks) > 0 { // Any valid held books?
 			// Must place a book
-			return []game.ActionSpec{game.ActionSpec{
+			return []game.ActionSpec{{
 				Payload:     PlaceBook{player, heldBooks[0]}.Encode(),
 				Description: "Place a book of " + heldBooks[0].plural,
 			}}
 		} // No valid held books
 		// End turn
-		return []game.ActionSpec{game.ActionSpec{
+		return []game.ActionSpec{{
 			Payload:     EndTurn{player, state.NextTurn(), state.turnNumber + 1}.Encode(),
 			Description: "End your turn",
 		}}
