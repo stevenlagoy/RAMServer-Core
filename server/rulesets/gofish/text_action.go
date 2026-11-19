@@ -64,6 +64,37 @@ func ParseTextAction(state State, actorID string, payload []byte) (Action, error
 
 var textActionGrammars = []textActionGrammar{
 	{
+		name:     "GoFish",
+		patterns: []textActionPattern{{regexp: regexp.MustCompile(`(?i)^go\s*fish!?$`), captures: map[string]int{}}},
+		build: func(state State, actor *Player, _ map[string]any) (Action, error) {
+			request, ok := state.recentAction.(CardRequest)
+			if !ok {
+				return nil, fmt.Errorf("there is no pending card request")
+			}
+			if request.to == nil || request.to.id != actor.id {
+				return nil, fmt.Errorf("this player was not asked for cards")
+			}
+			return CardResponse{from: actor, to: request.from, cards: []*Card{}}, nil
+		},
+	},
+	{
+		name:         "TellGoFish",
+		patterns:     []textActionPattern{{regexp: regexp.MustCompile(`(?i)^tell\s+(?:player\s+)?([Pp]?\d+)\s+to\s+go\s*fish!?$`), captures: map[string]int{"target": 1}}},
+		fieldNames:   []string{"target"},
+		fieldParsers: []textFieldParser{parsePlayerField},
+		build: func(state State, actor *Player, fields map[string]any) (Action, error) {
+			request, ok := state.recentAction.(CardRequest)
+			if !ok || request.to == nil || request.to.id != actor.id {
+				return nil, fmt.Errorf("there is no pending card request for this player")
+			}
+			order := fields["target"].(int)
+			if request.from.order != order {
+				return nil, fmt.Errorf("requested player does not match Player %d", order+1)
+			}
+			return CardResponse{from: actor, to: request.from, cards: []*Card{}}, nil
+		},
+	},
+	{
 		name:     "Deal",
 		patterns: []textActionPattern{{regexp: regexp.MustCompile(`(?i)^deal(?: cards)?$`), captures: map[string]int{}}},
 		build: func(state State, actor *Player, _ map[string]any) (Action, error) {
@@ -72,7 +103,7 @@ var textActionGrammars = []textActionGrammar{
 	},
 	{
 		name:     "EndTurn",
-		patterns: []textActionPattern{{regexp: regexp.MustCompile(`(?i)^(?:end(?: turn)?|pass)$`), captures: map[string]int{}}},
+		patterns: []textActionPattern{{regexp: regexp.MustCompile(`(?i)^(?:end(?: turn)?|end your turn|pass)$`), captures: map[string]int{}}},
 		build: func(state State, actor *Player, _ map[string]any) (Action, error) {
 			next := state.NextTurn()
 			if next == nil {
@@ -91,8 +122,39 @@ var textActionGrammars = []textActionGrammar{
 		},
 	},
 	{
-		name:         "Draw",
-		patterns:     []textActionPattern{{regexp: regexp.MustCompile(`(?i)^draw(?: (?:a|the))?\s+(.+)$`), captures: map[string]int{"card": 1}}},
+		name:     "Draw",
+		patterns: []textActionPattern{{regexp: regexp.MustCompile(`(?i)^draw$`), captures: map[string]int{}}},
+		build: func(state State, actor *Player, _ map[string]any) (Action, error) {
+			card := state.topOfPool()
+			if card == nil {
+				return nil, fmt.Errorf("there is no card in the pool")
+			}
+			return DrawFromPool{from: actor, card: card}, nil
+		},
+	},
+	{
+		name:     "DrawPoolDescription",
+		patterns: []textActionPattern{{regexp: regexp.MustCompile(`(?i)^draw\s+a\s+card\s+from\s+(?:the\s+)?pool$`), captures: map[string]int{}}},
+		build: func(state State, actor *Player, _ map[string]any) (Action, error) {
+			if _, ok := state.recentAction.(PlaceBook); ok {
+				card := state.topOfPool()
+				if card == nil {
+					return nil, fmt.Errorf("there is no card in the pool")
+				}
+				return TopUpFromPool{from: actor, card: card}, nil
+			}
+			card := state.topOfPool()
+			if card == nil {
+				return nil, fmt.Errorf("there is no card in the pool")
+			}
+			return DrawFromPool{from: actor, card: card}, nil
+		},
+	},
+	{
+		name: "DrawCard",
+		patterns: []textActionPattern{
+			{regexp: regexp.MustCompile(`(?i)^draw(?: (?:a|the))?\s+(.+)$`), captures: map[string]int{"card": 1}},
+		},
 		fieldNames:   []string{"card"},
 		fieldParsers: []textFieldParser{parseCardField},
 		build: func(_ State, actor *Player, fields map[string]any) (Action, error) {
@@ -100,8 +162,21 @@ var textActionGrammars = []textActionGrammar{
 		},
 	},
 	{
-		name:         "TopUp",
-		patterns:     []textActionPattern{{regexp: regexp.MustCompile(`(?i)^top\s*up(?: with)?\s+(.+)$`), captures: map[string]int{"card": 1}}},
+		name:     "TopUp",
+		patterns: []textActionPattern{{regexp: regexp.MustCompile(`(?i)^top\s*up$`), captures: map[string]int{}}},
+		build: func(state State, actor *Player, _ map[string]any) (Action, error) {
+			card := state.topOfPool()
+			if card == nil {
+				return nil, fmt.Errorf("there is no card in the pool")
+			}
+			return TopUpFromPool{from: actor, card: card}, nil
+		},
+	},
+	{
+		name: "TopUpCard",
+		patterns: []textActionPattern{
+			{regexp: regexp.MustCompile(`(?i)^top\s*up(?: with)?\s+(.+)$`), captures: map[string]int{"card": 1}},
+		},
 		fieldNames:   []string{"card"},
 		fieldParsers: []textFieldParser{parseCardField},
 		build: func(_ State, actor *Player, fields map[string]any) (Action, error) {
@@ -113,6 +188,7 @@ var textActionGrammars = []textActionGrammar{
 		patterns: []textActionPattern{
 			{regexp: regexp.MustCompile(`(?i)^ask\s+(?:player\s+)?([Pp]?\d+)\s+for\s+(.+)$`), captures: map[string]int{"target": 1, "rank": 2}},
 			{regexp: regexp.MustCompile(`(?i)^request\s+(?:player\s+)?([Pp]?\d+)\s+for\s+(.+)$`), captures: map[string]int{"target": 1, "rank": 2}},
+			{regexp: regexp.MustCompile(`(?i)^request\s+all\s+(.+?)\s+from\s+(?:player\s+)?([Pp]?\d+)$`), captures: map[string]int{"rank": 1, "target": 2}},
 			{regexp: regexp.MustCompile(`(?i)^give\s+me\s+(.+?)\s+from\s+(?:player\s+)?([Pp]?\d+)$`), captures: map[string]int{"rank": 1, "target": 2}},
 			{regexp: regexp.MustCompile(`(?i)^get\s+(.+?)\s+from\s+(?:player\s+)?([Pp]?\d+)$`), captures: map[string]int{"rank": 1, "target": 2}},
 		},
@@ -152,6 +228,72 @@ var textActionGrammars = []textActionGrammar{
 				CardResponse:  response,
 				TopUpFromPool: TopUpFromPool{from: actor, card: fields["drawn"].(*Card)},
 			}, nil
+		},
+	},
+	{
+		name:         "SendRequestedAndTopUp",
+		patterns:     []textActionPattern{{regexp: regexp.MustCompile(`(?i)^send\s+the\s+requested\s+(.+?)\s+to\s+(?:player\s+)?([Pp]?\d+),?\s+and\s+draw\s+one\s+card\s+from\s+(?:the\s+)?pool$`), captures: map[string]int{"rank": 1, "target": 2}}},
+		fieldNames:   []string{"rank", "target"},
+		fieldParsers: []textFieldParser{parseRankField, parsePlayerField},
+		build: func(state State, actor *Player, fields map[string]any) (Action, error) {
+			order := fields["target"].(int)
+			to := state.playerByOrder(order)
+			if to == nil {
+				return nil, fmt.Errorf("unknown recipient player P%d", order+1)
+			}
+			rank := fields["rank"].(Rank)
+			cards := make([]*Card, 0)
+			for _, card := range actor.hand {
+				if card.Rank == rank {
+					cards = append(cards, card)
+				}
+			}
+			card := state.topOfPool()
+			if card == nil {
+				return nil, fmt.Errorf("there is no card in the pool")
+			}
+			return CardResponseAndTopUp{
+				CardResponse:  CardResponse{from: actor, to: to, cards: cards},
+				TopUpFromPool: TopUpFromPool{from: actor, card: card},
+			}, nil
+		},
+	},
+	{
+		name: "SendRank",
+		patterns: []textActionPattern{
+			{regexp: regexp.MustCompile(`(?i)^send\s+the\s+requested\s+(.+?)\s+to\s+(?:player\s+)?([Pp]?\d+)$`), captures: map[string]int{"rank": 1, "target": 2}},
+			{regexp: regexp.MustCompile(`(?i)^send\s+(.+?)\s+to\s+(?:player\s+)?([Pp]?\d+)$`), captures: map[string]int{"rank": 1, "target": 2}},
+			{regexp: regexp.MustCompile(`(?i)^give\s+(.+?)\s+to\s+(?:player\s+)?([Pp]?\d+)$`), captures: map[string]int{"rank": 1, "target": 2}},
+		},
+		fieldNames:   []string{"rank", "target"},
+		fieldParsers: []textFieldParser{parseRankField, parsePlayerField},
+		build: func(state State, actor *Player, fields map[string]any) (Action, error) {
+			order := fields["target"].(int)
+			to := state.playerByOrder(order)
+			if to == nil {
+				return nil, fmt.Errorf("unknown recipient player P%d", order+1)
+			}
+			rank := fields["rank"].(Rank)
+			cards := make([]*Card, 0)
+			for _, card := range actor.hand {
+				if card.Rank == rank {
+					cards = append(cards, card)
+				}
+			}
+			if len(cards) == 0 {
+				return nil, fmt.Errorf("you do not hold any %s", rank.plural)
+			}
+			if len(actor.hand) == len(cards) {
+				card := state.topOfPool()
+				if card == nil {
+					return nil, fmt.Errorf("there is no card in the pool")
+				}
+				return CardResponseAndTopUp{
+					CardResponse:  CardResponse{from: actor, to: to, cards: cards},
+					TopUpFromPool: TopUpFromPool{from: actor, card: card},
+				}, nil
+			}
+			return CardResponse{from: actor, to: to, cards: cards}, nil
 		},
 	},
 	{
