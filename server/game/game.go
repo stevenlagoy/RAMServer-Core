@@ -101,3 +101,9 @@ type OutOfTurnActions interface {
 type Annotator interface {
 	Annotations(state GameState, memberID string) map[string]string
 }
+
+// Optional interface for games that require the session owner to receive a
+// particular role. If omitted, the session assigns roles from Roles() order.
+type OwnerRoleAssigner interface {
+	OwnerRole() Role
+}
