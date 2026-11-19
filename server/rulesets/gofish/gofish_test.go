@@ -129,19 +129,19 @@ func TestDealCardsSupportsEveryValidPlayerCount(t *testing.T) {
 			if players <= 3 {
 				wantHandSize = 7
 			}
-			for i := 0; i < players; i++ {
+			for i := range next.players {
 				if got := len(next.players[i].hand); got != wantHandSize {
 					t.Errorf("%s has %d cards, want %d", next.players[i].id, got, wantHandSize)
 				}
 				for round := 0; round < wantHandSize; round++ {
 					dealt := next.players[i].hand[round]
-					expected := next.cards[round*players+i]
+					expected := next.cards[round*len(next.players)+i]
 					if dealt.symbol() != expected.symbol() {
 						t.Errorf("%s round %d received %s, want %s", next.players[i].id, round, dealt.symbol(), expected.symbol())
 					}
 				}
 			}
-			if got, want := len(next.cardsInPool()), 52-players*wantHandSize; got != want {
+			if got, want := len(next.cardsInPool()), 52-len(next.players)*wantHandSize; got != want {
 				t.Errorf("pool has %d cards, want %d", got, want)
 			}
 			if got := (&Game{}).ActiveTurn(next); len(got) != 1 || got[0] != "player-0" {
@@ -250,6 +250,89 @@ func TestDecodeActionRoundTripsEveryActionType(t *testing.T) {
 	}
 }
 
+func TestTextActionGrammarRoundTripsToLegacyPayloads(t *testing.T) {
+	state := testState(
+		[]*Card{{Suit: Spades, Rank: Ace}},
+		[]*Card{{Suit: Hearts, Rank: King}},
+		[]*Card{{Suit: Diamonds, Rank: Queen}},
+		nil,
+	)
+	tests := []struct {
+		name  string
+		actor string
+		text  string
+		want  []byte
+	}{
+		{"ask canonical", "alice", "ask player 2 for kings", []byte{actionCardRequest, 0, 1, byte(King.value)}},
+		{"ask alias", "alice", "get Kings from P2", []byte{actionCardRequest, 0, 1, byte(King.value)}},
+		{"place", "alice", "place a book of aces", []byte{actionPlaceBook, 0, byte(Ace.value)}},
+		{"draw ASCII", "alice", "draw 10♦", []byte{actionDrawFromPool, 0, Card{Suit: Diamonds, Rank: Ten}.Encode()}},
+		{"draw symbol alias", "alice", "draw K♠", []byte{actionDrawFromPool, 0, Card{Suit: Spades, Rank: King}.Encode()}},
+		{"top up", "alice", "top up Q♥", []byte{actionTopUpFromPool, 0, Card{Suit: Hearts, Rank: Queen}.Encode()}},
+		{"send", "bob", "send P1: K♠, Q♥", nil},
+		{"send and top up", "bob", "send P1: K♠; draw 3♦", nil},
+		{"end turn", "alice", "pass", nil},
+		{"deal", "dealer", "deal cards", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			action, err := ParseTextAction(state, tt.actor, []byte(tt.text))
+			if err != nil {
+				t.Fatalf("ParseTextAction(%q): %v", tt.text, err)
+			}
+			if tt.want != nil && !bytes.Equal(action.Encode(), tt.want) {
+				t.Errorf("encoded %q = %v, want %v", tt.text, action.Encode(), tt.want)
+			}
+			if _, consumed, err := DecodeAction(action.Encode()); err != nil || consumed != len(action.Encode()) {
+				t.Errorf("normalized action %v did not round trip: consumed=%d err=%v", action.Encode(), consumed, err)
+			}
+		})
+	}
+}
+
+func TestTextActionRejectsUnknownAndMalformedCommands(t *testing.T) {
+	state := testState(
+		[]*Card{{Suit: Spades, Rank: Ace}},
+		nil,
+		nil,
+		nil,
+	)
+	for _, text := range []string{"", "ask anybody for aces", "place book of zebras", "draw ZZ", "send P99: A♠"} {
+		if _, err := ParseTextAction(state, "alice", []byte(text)); err == nil {
+			t.Errorf("ParseTextAction(%q) unexpectedly accepted text", text)
+		}
+	}
+}
+
+func TestViewForDecodesRecentTransferredCards(t *testing.T) {
+	state := testState(
+		[]*Card{{Suit: Spades, Rank: Ace}, {Suit: Hearts, Rank: Ace}},
+		nil,
+		nil,
+		nil,
+	)
+	state.recentAction = CardResponse{
+		from:  &state.players[1],
+		to:    &state.players[0],
+		cards: []*Card{{Suit: Spades, Rank: Ace}, {Suit: Hearts, Rank: Ace}},
+	}
+	viewBytes := (&Game{}).ViewFor(state, "alice")
+	view, consumed, err := (View{}).Decode(viewBytes)
+	if err != nil {
+		t.Fatalf("Decode(view): %v", err)
+	}
+	if consumed != len(viewBytes) {
+		t.Fatalf("Decode(view) consumed %d bytes, want %d", consumed, len(viewBytes))
+	}
+	response, ok := view.recentAction.(CardResponse)
+	if !ok {
+		t.Fatalf("recent action = %T, want CardResponse", view.recentAction)
+	}
+	if len(response.cards) != 2 {
+		t.Errorf("recent response contains %d cards, want 2", len(response.cards))
+	}
+}
+
 func TestActiveTurnAndLegalActions(t *testing.T) {
 	state := testState(
 		[]*Card{{Suit: Spades, Rank: Ace}},
@@ -309,6 +392,16 @@ func TestViewForEncodesPrivateHandAndPublicPlayerData(t *testing.T) {
 	view := (&Game{}).ViewFor(state, "alice")
 	if len(view) == 0 {
 		t.Fatal("ViewFor returned an empty view")
+	}
+	decodedView, consumed, err := (View{}).Decode(view)
+	if err != nil {
+		t.Fatalf("Decode(view): %v", err)
+	}
+	if consumed != len(view) {
+		t.Errorf("Decode(view) consumed %d bytes, want %d", consumed, len(view))
+	}
+	if decodedView.self.handSize != 1 || len(decodedView.self.hand) != 1 {
+		t.Errorf("self hand = %d cards, want private size and one card", len(decodedView.self.hand))
 	}
 	if _, err := state.viewFor("missing"); err == nil {
 		t.Error("viewFor accepted an unknown player")
