@@ -86,6 +86,10 @@ func (c Card) symbol() string {
 	return c.Rank.symbol + c.Suit.symbolFilled
 }
 
+func (c Card) String() string {
+	return c.symbol()
+}
+
 // Every card has a different encoding based on its suit's offset and its rank's value
 func (c Card) Encode() uint8 {
 	return uint8(c.Suit.offset + c.Rank.value)

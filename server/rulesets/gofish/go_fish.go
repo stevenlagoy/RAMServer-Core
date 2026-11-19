@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
 )
@@ -13,6 +15,7 @@ const Name = "go fish"
 type Game struct{}
 
 var _ game.Game = (*Game)(nil) // Compile-time check that Go Fish implements Game
+var _ game.Annotator = (*Game)(nil)
 
 const RoleDealer = "Dealer"
 
@@ -24,11 +27,64 @@ func (g *Game) Roles() []game.RoleSpec {
 	}
 }
 
+func (g *Game) OwnerRole() game.Role {
+	return RoleDealer
+}
+
+func (g *Game) Annotations(s game.GameState, memberID string) map[string]string {
+	state := s.(State)
+	view, err := state.viewFor(memberID)
+	if err != nil {
+		return nil
+	}
+	hand := make([]string, 0, len(view.self.hand))
+	for _, card := range view.self.hand {
+		hand = append(hand, card.String())
+	}
+	if len(hand) == 0 {
+		hand = append(hand, "none")
+	}
+	books := make([]string, 0, len(view.self.books))
+	for _, book := range view.self.books {
+		books = append(books, book.rank.symbol)
+	}
+	if len(books) == 0 {
+		books = append(books, "none")
+	}
+	annotations := map[string]string{
+		"hand":      strings.Join(hand, ","),
+		"books":     strings.Join(books, ","),
+		"pool_size": strconv.Itoa(view.poolSize),
+		"turn":      strconv.Itoa(view.turnNumber),
+	}
+	for i, player := range view.players {
+		prefix := fmt.Sprintf("player_%d_", i+1)
+		annotations[prefix+"hand_size"] = strconv.Itoa(player.handSize)
+		playerBooks := make([]string, 0, len(player.books))
+		for _, book := range player.books {
+			playerBooks = append(playerBooks, book.rank.symbol)
+		}
+		if len(playerBooks) == 0 {
+			playerBooks = append(playerBooks, "none")
+		}
+		annotations[prefix+"books"] = strings.Join(playerBooks, ",")
+	}
+	return annotations
+}
+
 func (g *Game) NewState(order []string, roles map[string]game.Role) game.GameState {
 	players := make([]Player, 0, len(order))
-	for order, id := range order {
-		if roles[id] != game.RoleSpectator {
-			players = append(players, Player{PlayerOutsideView{id, 0, []Book{}, order}, []*Card{}})
+	nextOrder := 0
+	for _, id := range order {
+		if roles[id] != game.RoleSpectator && roles[id] != RoleDealer {
+			players = append(players, Player{PlayerOutsideView{id, 0, []Book{}, nextOrder}, []*Card{}})
+			nextOrder++
+		}
+	}
+	for _, id := range order {
+		if roles[id] == RoleDealer {
+			players = append(players, Player{PlayerOutsideView{id, 0, []Book{}, nextOrder}, []*Card{}})
+			nextOrder++
 		}
 	}
 	if len(players) < 3 || len(players) > 6 {
