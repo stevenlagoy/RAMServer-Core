@@ -298,6 +298,16 @@ func (s *Session) assignRole() game.Role {
 	for _, m := range s.members {
 		counts[m.Role]++
 	}
+	if len(s.members) == 0 {
+		if assigner, ok := s.Game.(game.OwnerRoleAssigner); ok {
+			role := assigner.OwnerRole()
+			for _, spec := range s.Game.Roles() {
+				if spec.Name == role && (spec.Max == 0 || counts[role] < spec.Max) {
+					return role
+				}
+			}
+		}
+	}
 	for _, spec := range s.Game.Roles() {
 		if spec.Max == 0 || counts[spec.Name] < spec.Max {
 			return spec.Name
