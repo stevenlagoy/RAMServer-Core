@@ -172,13 +172,20 @@ func (s State) CurrentTurn() *Player {
 // Return the player whose turn follows the current one. Requires that players are ordered by their
 // play order. Skips any players who hold no cards.
 func (s State) NextTurn() *Player {
-	order := s.turnNumber%len(s.players) + 1
-	for _, player := range s.players {
-		if player.order >= order && len(player.hand) > 0 {
-			return &player
+	if len(s.players) == 0 {
+		return nil
+	}
+	// Start after the current turn and wrap around play order. Skipping
+	// empty-handed players keeps turn advancement valid at the end of the table.
+	for distance := 1; distance <= len(s.players); distance++ {
+		order := (s.turnNumber + distance) % len(s.players)
+		for i := range s.players {
+			if s.players[i].order == order && len(s.players[i].hand) > 0 {
+				return &s.players[i]
+			}
 		}
 	}
-	panic("Current turn number is invalid")
+	return nil
 }
 
 func (s State) OpponentPlayersOf(player *Player) []*Player {
