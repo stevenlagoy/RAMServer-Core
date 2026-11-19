@@ -4,6 +4,17 @@ import (
 	"fmt"
 )
 
+const (
+	actionCardRequest byte = iota + 1
+	actionCardResponse
+	actionCardResponseAndTopUp
+	actionPlaceBook
+	actionDrawFromPool
+	actionTopUpFromPool
+	actionEndTurn
+	actionDealCards
+)
+
 type Action interface {
 	From() *Player
 	To() *Player
@@ -31,12 +42,12 @@ func (a CardRequest) To() *Player {
 	return a.to
 }
 
-// 3 bytes: from player order, to player order, encoded rank
+// 4 bytes: type, from player order, to player order, encoded rank
 func (a CardRequest) Encode() []byte {
 	from := uint8(a.from.order)
 	to := uint8(a.to.order)
 	rank := uint8(a.rank.value)
-	return []byte{from, to, rank}
+	return []byte{actionCardRequest, from, to, rank}
 }
 
 /*
@@ -58,16 +69,16 @@ func (a CardResponse) To() *Player {
 	return a.to
 }
 
-// 3 or more bytes: from player order, to player order, number of cards, and one byte for each card. If no cards, "Go fish"
+// 5 or more bytes: type, from player order, to player order, number of cards, and one byte for each card. If no cards, "Go fish"
 func (a CardResponse) Encode() []byte {
 	from := uint8(a.from.order)
 	to := uint8(a.to.order)
 	numCards := uint8(len(a.cards))
-	cards := make([]uint8, len(a.cards))
+	cards := make([]uint8, 0, len(a.cards))
 	for _, card := range a.cards {
 		cards = append(cards, card.Encode())
 	}
-	return append([]byte{from, to, numCards}, cards...)
+	return append([]byte{actionCardResponse, from, to, numCards}, cards...)
 }
 
 type CardResponseAndTopUp struct {
@@ -88,11 +99,11 @@ func (a CardResponseAndTopUp) Encode() []byte {
 	to := uint8(a.CardResponse.to.order)
 	cardDrawn := a.card.Encode()
 	numCards := uint8(len(a.cards))
-	cards := make([]uint8, len(a.cards))
+	cards := make([]uint8, 0, len(a.cards))
 	for _, card := range a.cards {
 		cards = append(cards, card.Encode())
 	}
-	return append([]byte{from, to, cardDrawn, numCards}, cards...)
+	return append([]byte{actionCardResponseAndTopUp, from, to, cardDrawn, numCards}, cards...)
 }
 
 /*
@@ -115,11 +126,11 @@ func (a PlaceBook) To() *Player {
 	return a.from
 }
 
-// 3 bytes: player order, player order (padding), rank placed
+// 3 bytes: type, player order, rank placed
 func (a PlaceBook) Encode() []byte {
 	player := uint8(a.from.order)
 	rank := uint8(a.rank.value)
-	return []byte{player, player, rank}
+	return []byte{actionPlaceBook, player, rank}
 }
 
 /*
@@ -140,11 +151,11 @@ func (a DrawFromPool) To() *Player {
 	return a.from
 }
 
-// 3 bytes: player order, player order (padding), card drawn
+// 3 bytes: type, player order, card drawn
 func (a DrawFromPool) Encode() []byte {
 	player := uint8(a.from.order)
 	card := a.card.Encode()
-	return []byte{player, player, card}
+	return []byte{actionDrawFromPool, player, card}
 }
 
 /*
@@ -165,17 +176,29 @@ func (a TopUpFromPool) To() *Player {
 	return a.from
 }
 
-// 3 bytes: player order, player order (padding), card drawn
+// 3 bytes: type, player order, card drawn
 func (a TopUpFromPool) Encode() []byte {
 	player := uint8(a.from.order)
 	card := a.card.Encode()
-	return []byte{player, player, card}
+	return []byte{actionTopUpFromPool, player, card}
 }
 
 type EndTurn struct {
 	from     *Player
 	to       *Player // Next player in order
 	newOrder int
+}
+
+type DealCards struct {
+	dealer *Player
+	first  *Player
+}
+
+func (a DealCards) From() *Player { return a.dealer }
+func (a DealCards) To() *Player   { return a.first }
+
+func (a DealCards) Encode() []byte {
+	return []byte{actionDealCards, uint8(a.dealer.order), uint8(a.first.order)}
 }
 
 func (a EndTurn) From() *Player {
@@ -186,14 +209,94 @@ func (a EndTurn) To() *Player {
 	return a.to
 }
 
-// 3 bytes: from player order, to player order, new order value
+// 4 bytes: type, from player order, to player order, new order value
 func (a EndTurn) Encode() []byte {
 	from := uint8(a.from.order)
 	to := uint8(a.to.order)
-	return []byte{from, to, uint8(a.newOrder)}
+	return []byte{actionEndTurn, from, to, uint8(a.newOrder)}
 }
 
 func DecodeAction(encoded []byte) (Action, int, error) {
-	// TODO
-	return DrawFromPool{nil, &Card{}}, 0, fmt.Errorf("not yet implemented")
+	if len(encoded) == 0 {
+		return nil, 0, fmt.Errorf("empty action")
+	}
+	player := func(order byte) *Player {
+		return &Player{PlayerOutsideView: PlayerOutsideView{order: int(order)}}
+	}
+	card := func(value byte) (*Card, error) {
+		decoded, err := DecodeCard([]byte{value})
+		if err != nil {
+			return nil, err
+		}
+		return &decoded, nil
+	}
+	switch encoded[0] {
+	case actionCardRequest:
+		if len(encoded) != 4 || encoded[3] < 1 || encoded[3] > 13 {
+			return nil, 0, fmt.Errorf("invalid card request")
+		}
+		return CardRequest{player(encoded[1]), player(encoded[2]), RankFromValue[int(encoded[3])]}, 4, nil
+	case actionCardResponse:
+		if len(encoded) < 4 || int(encoded[3]) != len(encoded)-4 {
+			return nil, 0, fmt.Errorf("invalid card response")
+		}
+		cards := make([]*Card, 0, encoded[3])
+		for _, value := range encoded[4:] {
+			decoded, err := card(value)
+			if err != nil {
+				return nil, 0, err
+			}
+			cards = append(cards, decoded)
+		}
+		return CardResponse{player(encoded[1]), player(encoded[2]), cards}, len(encoded), nil
+	case actionCardResponseAndTopUp:
+		if len(encoded) < 5 || int(encoded[4]) != len(encoded)-5 {
+			return nil, 0, fmt.Errorf("invalid card response and top-up")
+		}
+		drawn, err := card(encoded[3])
+		if err != nil {
+			return nil, 0, err
+		}
+		cards := make([]*Card, 0, encoded[4])
+		for _, value := range encoded[5:] {
+			decoded, err := card(value)
+			if err != nil {
+				return nil, 0, err
+			}
+			cards = append(cards, decoded)
+		}
+		return CardResponseAndTopUp{
+			CardResponse:  CardResponse{player(encoded[1]), player(encoded[2]), cards},
+			TopUpFromPool: TopUpFromPool{player(encoded[1]), drawn},
+		}, len(encoded), nil
+	case actionPlaceBook:
+		if len(encoded) != 3 || encoded[2] < 1 || encoded[2] > 13 {
+			return nil, 0, fmt.Errorf("invalid place-book action")
+		}
+		return PlaceBook{player(encoded[1]), RankFromValue[int(encoded[2])]}, 3, nil
+	case actionDrawFromPool, actionTopUpFromPool:
+		if len(encoded) != 3 {
+			return nil, 0, fmt.Errorf("invalid draw action")
+		}
+		drawn, err := card(encoded[2])
+		if err != nil {
+			return nil, 0, err
+		}
+		if encoded[0] == actionDrawFromPool {
+			return DrawFromPool{player(encoded[1]), drawn}, 3, nil
+		}
+		return TopUpFromPool{player(encoded[1]), drawn}, 3, nil
+	case actionEndTurn:
+		if len(encoded) != 4 {
+			return nil, 0, fmt.Errorf("invalid end-turn action")
+		}
+		return EndTurn{player(encoded[1]), player(encoded[2]), int(encoded[3])}, 4, nil
+	case actionDealCards:
+		if len(encoded) != 3 {
+			return nil, 0, fmt.Errorf("invalid deal action")
+		}
+		return DealCards{player(encoded[1]), player(encoded[2])}, 3, nil
+	default:
+		return nil, 0, fmt.Errorf("unknown action type: %d", encoded[0])
+	}
 }
