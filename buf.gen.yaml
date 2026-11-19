@@ -1,9 +1,14 @@
 version: v2
+
+inputs:
+  - git_repo: https://github.com/stevenlagoy/RAMServer-Core.git
+    branch: main
+    subdir: proto
+
 plugins:
-  - remote: buf.build/protocolbuffers/go
-    out: server/gen
-    opt: paths=source_relative
-  - remote: buf.build/protocolbuffers/java
-    out: clients/chess/compiled_client/gen
-  - remote: buf.build/protocolbuffers/python
-    out: clients/chess/interpreted_client/gen
+  - remote: buf.build/bufbuild/es:v2.15.0
+    out: clients/ts_go_fish/gen
+    opt:
+      - target=ts
+      # Uncomment below if using NodeNext / ESM modules requiring extensions
+      # - import_extension=js
