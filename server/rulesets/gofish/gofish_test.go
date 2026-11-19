@@ -70,6 +70,37 @@ func TestReadyToStartSupportsEveryValidPlayerCount(t *testing.T) {
 	}
 }
 
+func TestAnnotationsDescribeSelfAndPublicPlayerState(t *testing.T) {
+	state := testState(
+		[]*Card{{Suit: Spades, Rank: Ace}, {Suit: Hearts, Rank: King}},
+		[]*Card{{Suit: Diamonds, Rank: Three}},
+		nil,
+		[]*Card{{Suit: Clubs, Rank: Queen}},
+	)
+	state.turnNumber = 2
+	state.players[0].books = []Book{{rank: Ace, player: state.players[0].PlayerOutsideView}}
+	state.players[1].handSize = len(state.players[1].hand)
+
+	got := (&Game{}).Annotations(state, "alice")
+	want := map[string]string{
+		"hand":               "A♠,K♥",
+		"books":              "A",
+		"pool_size":          "1",
+		"turn":               "2",
+		"player_1_hand_size": "2",
+		"player_1_books":     "A",
+		"player_2_hand_size": "1",
+		"player_2_books":     "none",
+		"player_3_hand_size": "0",
+		"player_3_books":     "none",
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Errorf("Annotations()[%q] = %q, want %q", key, got[key], value)
+		}
+	}
+}
+
 func TestNewStateCreatesOneDeckAndExcludesSpectators(t *testing.T) {
 	g := &Game{}
 	state := g.NewState(
@@ -104,6 +135,52 @@ func TestNewStateCreatesOneDeckAndExcludesSpectators(t *testing.T) {
 	}
 	if legal := (&Game{}).LegalActions(state, "dealer"); len(legal) != 1 {
 		t.Errorf("dealer has %d initial actions, want one deal action", len(legal))
+	}
+}
+
+func TestNextTurnWrapsAndSkipsEmptyHands(t *testing.T) {
+	state := testState(
+		[]*Card{{Suit: Spades, Rank: Ace}},
+		nil,
+		[]*Card{{Suit: Hearts, Rank: King}},
+		nil,
+	)
+	state.turnNumber = 2
+
+	next := state.NextTurn()
+	if next == nil || next.id != "alice" {
+		t.Fatalf("NextTurn() = %v, want alice after wrapping from dealer", next)
+	}
+
+	state.players[0].hand = nil
+	state.players[0].handSize = 0
+	state.players[1].hand = nil
+	state.players[1].handSize = 0
+	state.turnNumber = 2
+	if next = state.NextTurn(); next == nil || next.id != "dealer" {
+		t.Fatalf("NextTurn() = %v, want dealer when bob and alice are empty", next)
+	}
+}
+
+func TestEndTurnTextActionsWrapToFirstPlayer(t *testing.T) {
+	state := testState(
+		[]*Card{{Suit: Spades, Rank: Ace}},
+		[]*Card{{Suit: Hearts, Rank: King}},
+		[]*Card{{Suit: Diamonds, Rank: Queen}},
+		nil,
+	)
+	state.turnNumber = 2
+
+	for _, text := range []string{"end", "end turn", "end your turn", "pass"} {
+		action, err := ParseTextAction(state, "dealer", []byte(text))
+		if err != nil {
+			t.Errorf("ParseTextAction(%q): %v", text, err)
+			continue
+		}
+		end := action.(EndTurn)
+		if end.to.id != "alice" {
+			t.Errorf("ParseTextAction(%q) targets %q, want alice", text, end.to.id)
+		}
 	}
 }
 
@@ -255,7 +332,7 @@ func TestTextActionGrammarRoundTripsToLegacyPayloads(t *testing.T) {
 		[]*Card{{Suit: Spades, Rank: Ace}},
 		[]*Card{{Suit: Hearts, Rank: King}},
 		[]*Card{{Suit: Diamonds, Rank: Queen}},
-		nil,
+		[]*Card{{Suit: Hearts, Rank: Three}},
 	)
 	tests := []struct {
 		name  string
@@ -266,12 +343,17 @@ func TestTextActionGrammarRoundTripsToLegacyPayloads(t *testing.T) {
 		{"ask canonical", "alice", "ask player 2 for kings", []byte{actionCardRequest, 0, 1, byte(King.value)}},
 		{"ask alias", "alice", "get Kings from P2", []byte{actionCardRequest, 0, 1, byte(King.value)}},
 		{"place", "alice", "place a book of aces", []byte{actionPlaceBook, 0, byte(Ace.value)}},
+		{"place description", "alice", "Place a book of aces", []byte{actionPlaceBook, 0, byte(Ace.value)}},
 		{"draw ASCII", "alice", "draw 10♦", []byte{actionDrawFromPool, 0, Card{Suit: Diamonds, Rank: Ten}.Encode()}},
 		{"draw symbol alias", "alice", "draw K♠", []byte{actionDrawFromPool, 0, Card{Suit: Spades, Rank: King}.Encode()}},
+		{"draw bare", "alice", "draw", []byte{actionDrawFromPool, 0, Card{Suit: Hearts, Rank: Three}.Encode()}},
+		{"draw description", "alice", "Draw a card from the pool", []byte{actionDrawFromPool, 0, Card{Suit: Hearts, Rank: Three}.Encode()}},
 		{"top up", "alice", "top up Q♥", []byte{actionTopUpFromPool, 0, Card{Suit: Hearts, Rank: Queen}.Encode()}},
+		{"top up bare", "alice", "top up", []byte{actionTopUpFromPool, 0, Card{Suit: Hearts, Rank: Three}.Encode()}},
 		{"send", "bob", "send P1: K♠, Q♥", nil},
 		{"send and top up", "bob", "send P1: K♠; draw 3♦", nil},
 		{"end turn", "alice", "pass", nil},
+		{"end turn description", "alice", "End your turn", nil},
 		{"deal", "dealer", "deal cards", nil},
 	}
 	for _, tt := range tests {
@@ -287,6 +369,103 @@ func TestTextActionGrammarRoundTripsToLegacyPayloads(t *testing.T) {
 				t.Errorf("normalized action %v did not round trip: consumed=%d err=%v", action.Encode(), consumed, err)
 			}
 		})
+	}
+}
+
+func TestTextGoFishAndSendRankActions(t *testing.T) {
+	state := testState(
+		[]*Card{{Suit: Spades, Rank: Ace}},
+		[]*Card{{Suit: Hearts, Rank: Three}, {Suit: Clubs, Rank: Three}},
+		nil,
+		[]*Card{{Suit: Diamonds, Rank: Seven}},
+	)
+	requester := &state.players[0]
+	requestee := &state.players[1]
+	state.recentAction = CardRequest{from: requester, to: requestee, rank: Three}
+
+	goFish, err := ParseTextAction(state, "bob", []byte("go fish"))
+	if err != nil {
+		t.Fatalf("ParseTextAction(go fish): %v", err)
+	}
+	response := goFish.(CardResponse)
+	if len(response.cards) != 0 || response.from.id != "bob" || response.to.id != "alice" {
+		t.Errorf("go fish action = %+v, want empty response from bob to alice", response)
+	}
+
+	state.recentAction = nil
+	send, err := ParseTextAction(state, "bob", []byte("send threes to player 1"))
+	if err != nil {
+		t.Fatalf("ParseTextAction(send threes): %v", err)
+	}
+	combined, ok := send.(CardResponseAndTopUp)
+	if !ok {
+		t.Fatalf("send threes action = %T, want CardResponseAndTopUp", send)
+	}
+	response = combined.CardResponse
+	if len(response.cards) != 2 || response.from.id != "bob" || response.to.id != "alice" {
+		t.Errorf("send threes action = %+v, want two threes from bob to alice", response)
+	}
+
+	state.recentAction = CardRequest{from: requester, to: requestee, rank: Three}
+	tellGoFish, err := ParseTextAction(state, "bob", []byte("Tell Player 1 to Go Fish!"))
+	if err == nil {
+		request := tellGoFish.(CardResponse)
+		if len(request.cards) != 0 {
+			t.Errorf("Tell Player 1 to Go Fish! returned cards: %+v", request.cards)
+		}
+	}
+
+	sendRequested, err := ParseTextAction(state, "bob", []byte("Send the requested threes to Player 1"))
+	if err != nil {
+		t.Errorf("ParseTextAction(Send the requested threes): %v", err)
+	} else if _, ok := sendRequested.(CardResponseAndTopUp); !ok {
+		t.Errorf("Send the requested threes = %T, want CardResponseAndTopUp", sendRequested)
+	}
+
+	sendAndDraw, err := ParseTextAction(state, "bob", []byte("Send the requested threes to Player 1, and draw one card from the pool"))
+	if err != nil {
+		t.Errorf("ParseTextAction(Send the requested threes and draw): %v", err)
+	} else if _, ok := sendAndDraw.(CardResponseAndTopUp); !ok {
+		t.Errorf("Send the requested threes and draw = %T, want CardResponseAndTopUp", sendAndDraw)
+	}
+}
+
+func TestLegalActionDescriptionsCanBeSubmittedAsText(t *testing.T) {
+	state := testState(
+		[]*Card{{Suit: Spades, Rank: Seven}},
+		[]*Card{{Suit: Hearts, Rank: Ace}},
+		nil,
+		[]*Card{{Suit: Hearts, Rank: Three}},
+	)
+	state.recentAction = DealCards{
+		dealer: &state.players[2],
+		first:  &state.players[0],
+	}
+
+	for _, spec := range (&Game{}).LegalActions(state, "alice") {
+		action, err := ParseTextAction(state, "alice", []byte(spec.Description))
+		if err != nil {
+			t.Errorf("could not parse request description %q: %v", spec.Description, err)
+			continue
+		}
+		if err := (&Game{}).Validate(state, game.Action{ActorID: "alice", Payload: []byte(spec.Description)}); err != nil {
+			t.Errorf("could not validate request description %q: %v", spec.Description, err)
+		}
+		if action.Encode() == nil {
+			t.Errorf("request description %q normalized to no action", spec.Description)
+		}
+	}
+
+	state.recentAction = CardResponse{from: &state.players[0], to: &state.players[1], cards: []*Card{}}
+	drawLegals := (&Game{}).LegalActions(state, "bob")
+	if len(drawLegals) != 1 {
+		t.Fatalf("draw phase has %d legals, want 1", len(drawLegals))
+	}
+	if drawLegals[0].Description != "Draw a card from the pool" {
+		t.Errorf("draw description = %q, want %q", drawLegals[0].Description, "Draw a card from the pool")
+	}
+	if _, err := ParseTextAction(state, "bob", []byte(drawLegals[0].Description)); err != nil {
+		t.Errorf("could not parse draw description: %v", err)
 	}
 }
 
