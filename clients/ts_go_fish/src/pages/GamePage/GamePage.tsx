@@ -1,5 +1,5 @@
 import styles from "./GamePage.module.scss";
-import PlayingCard from "@/PlayingCard";
+import PlayingCard from "@components/PlayingCard";
 import { cards } from "@data/cards";
 
 export default function GamePage() {
