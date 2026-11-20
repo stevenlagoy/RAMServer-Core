@@ -1,0 +1,64 @@
+@use "./colors" as *;
+
+:root { /* Light Color Theme */
+    
+    --base-brightness: 100;
+    --background-opacity: 70%;
+
+    --background-1: rgb(from #{$gray-100} r b g / var(--background-opacity));
+    --background-2: rgb(from #{$gray-090} r b g / var(--background-opacity));
+    --background-3: rgb(from #{$gray-080} r b g / var(--background-opacity));
+    --background-4: rgb(from #{$gray-070} r b g / var(--background-opacity));
+    --background-5: rgb(from #{$gray-050} r b g / var(--background-opacity));
+
+    --brand-red: #{$brand-red-75};
+    --brand-orange: #{$brand-orange-75};
+    --brand-green: #{$brand-green-75};
+    --brand-cyan: #{$brand-cyan-75};
+    --brand-blue: #{$brand-blue-75};
+    --brand-purple: #{$brand-purple-75};
+    --brand-pink: #{$brand-pink-75};
+
+    --text-1: #{$gray-000};
+    --text-2: #{$gray-030};
+    --text-3: #{$gray-100};
+
+    --border-1: #{$gray-000};
+    --border-2: #{$gray-030};
+    --border-3: #{$gray-050};
+
+    --link-1: #{$brand-green-25};
+    --link-2: #{$brand-green-50};
+
+    --content-background: url("@assets/background-light.png");
+}
+
+$base-brightness: var(--base-brightness);
+$invert-brightness: calc(100 - var(--base-brightness));
+
+$background-1: var(--background-1);
+$background-2: var(--background-2);
+$background-3: var(--background-3);
+$background-4: var(--background-4);
+$background-5: var(--background-5);
+
+$brand-red: var(--brand-red);
+$brand-orange: var(--brand-orange);
+$brand-green: var(--brand-green);
+$brand-cyan: var(--brand-cyan);
+$brand-blue: var(--brand-blue);
+$brand-purple: var(--brand-purple);
+$brand-pink: var(--brand-pink);
+
+$text-1: var(--text-1);
+$text-2: var(--text-2);
+$text-3: var(--text-3);
+
+$border-1: var(--border-1);
+$border-2: var(--border-2);
+$border-3: var(--border-3);
+
+$link-1: var(--link-1);
+$link-2: var(--link-2);
+
+$content-background: var(--content-background);
