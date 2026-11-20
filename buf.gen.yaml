@@ -7,7 +7,7 @@ inputs:
 
 plugins:
   - remote: buf.build/bufbuild/es:v2.15.0
-    out: clients/ts_go_fish/gen
+    out: clients/ts_go_fish/src/protocol/gen
     opt:
       - target=ts
       # Uncomment below if using NodeNext / ESM modules requiring extensions
