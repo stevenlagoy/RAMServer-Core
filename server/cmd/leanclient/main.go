@@ -28,9 +28,12 @@ const (
 const helpText = `Commands:
   connect [protocol_version]               send ConnectRequest
   auth <display_name> [player_id token]    send AuthRequest
-  create <game_id>                         create a session (JoinSessionRequest without session_id)
+  play <game_id>                           join an open session, or create one if there is none
+  create <game_id> [private]               always create a new session (private: unlisted, joined only by its id)
   join <game_id> <session_id>              join an existing session
   leave [session_id]                       leave a session (default: current session)
+  list [game_id]                           send ListSessionsRequest (default: every game)
+  history [session_id]                     send MatchHistoryRequest (default: current session)
   action <payload>                         send ActionRequest to the current session
   ready [true|false]                       send SetReadyRequest for the current session (default: true)
   legal                                    send LegalActionsRequest for the current session
@@ -88,6 +91,10 @@ func clientMessageKind(msg *pb.ClientMessage) string {
 		return "READY"
 	case *pb.ClientMessage_LegalActionsRequest:
 		return "LEGAL"
+	case *pb.ClientMessage_ListSessionsRequest:
+		return "LIST"
+	case *pb.ClientMessage_MatchHistoryRequest:
+		return "HISTORY"
 	default:
 		return "UNKNOWN"
 	}
@@ -110,6 +117,10 @@ func serverMessageKind(msg *pb.ServerMessage) string {
 		return "LEFT"
 	case *pb.ServerMessage_LegalActionsResponse:
 		return "ACTIONS"
+	case *pb.ServerMessage_ListSessionsResponse:
+		return "SESSIONS"
+	case *pb.ServerMessage_MatchHistoryResponse:
+		return "HISTORY"
 	default:
 		return "UNKNOWN"
 	}
@@ -145,12 +156,23 @@ func parseCommand(line, currentSession string) (msg *pb.ClientMessage, raw []byt
 			req.PlayerId, req.ReconnectToken = args[1], args[2]
 		}
 		return &pb.ClientMessage{Payload: &pb.ClientMessage_AuthRequest{AuthRequest: req}}, nil, nil
-	case "create":
+	case "play":
 		if len(args) != 1 {
-			return nil, nil, errors.New("usage: create <game_id>")
+			return nil, nil, errors.New("usage: play <game_id>")
 		}
+		// Without session_id, the server joins an open session or creates one
 		return &pb.ClientMessage{Payload: &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{
 			GameId: args[0],
+		}}}, nil, nil
+	case "create":
+		private := len(args) == 2 && args[1] == "private"
+		if len(args) != 1 && !private {
+			return nil, nil, errors.New("usage: create <game_id> [private]")
+		}
+		return &pb.ClientMessage{Payload: &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{
+			GameId:         args[0],
+			CreateNew:      true,
+			PrivateSession: private,
 		}}}, nil, nil
 	case "join":
 		if len(args) != 2 {
@@ -208,6 +230,29 @@ func parseCommand(line, currentSession string) (msg *pb.ClientMessage, raw []byt
 		}
 		return &pb.ClientMessage{Payload: &pb.ClientMessage_LegalActionsRequest{LegalActionsRequest: &pb.LegalActionsRequest{
 			SessionId: currentSession,
+		}}}, nil, nil
+	case "list":
+		if len(args) > 1 {
+			return nil, nil, errors.New("usage: list [game_id]")
+		}
+		req := &pb.ListSessionsRequest{}
+		if len(args) == 1 {
+			req.GameId = args[0]
+		}
+		return &pb.ClientMessage{Payload: &pb.ClientMessage_ListSessionsRequest{ListSessionsRequest: req}}, nil, nil
+	case "history":
+		if len(args) > 1 {
+			return nil, nil, errors.New("usage: history [session_id]")
+		}
+		sessionID := currentSession
+		if len(args) == 1 {
+			sessionID = args[0]
+		}
+		if sessionID == "" {
+			return nil, nil, errors.New("not in a session; use: history <session_id>")
+		}
+		return &pb.ClientMessage{Payload: &pb.ClientMessage_MatchHistoryRequest{MatchHistoryRequest: &pb.MatchHistoryRequest{
+			SessionId: sessionID,
 		}}}, nil, nil
 	case "raw":
 		if rest == "" {
