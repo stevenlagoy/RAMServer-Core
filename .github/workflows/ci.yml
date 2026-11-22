@@ -3,12 +3,10 @@ name: CI
 on:
   push:
     branches:
-      - 'feature/20-interpreted-chess-client'
-      - 'python-chess'
+      - 'clients/pychess'
   pull_request:
     branches:
-      - 'feature/20-interpreted-chess-client'
-      - 'python-chess'
+      - 'clients/pychess'
 
 jobs:
   python:
