@@ -19,16 +19,16 @@ Chess rules follow the FIDE Laws of Chess, Section I. There is no turn timer and
 
 ## Status
 
-| Feature                                                               | State               |
-|-----------------------------------------------------------------------|---------------------|
-| All piece movement, castling, en passant, promotion                   | Implemented, tested |
-| Check, pins, and moves which leave the king attacked                  | Implemented, tested |
-| Checkmate, stalemate, insufficient material, 75-move rule, repetition | Implemented, tested |
-| UCI moves from clients                                                | Implemented         |
-| SAN output for move history                                           | Implemented         |
-| King status (in check, checkmate, none) sent to clients               | Not implemented     |
-| Resignation                                                           | Not implemented     |
-| Draw offers, acceptance, and claims                                   | Implemented, tested |
+| Feature                                                                | State               |
+|------------------------------------------------------------------------|---------------------|
+| All piece movement, castling, en passant, promotion                    | Implemented, tested |
+| Check, pins, and moves which leave the king attacked                   | Implemented, tested |
+| Checkmate, stalemate, insufficient material, 75-move rule, repetition  | Implemented, tested |
+| UCI moves from clients                                                 | Implemented         |
+| SAN output for move history                                            | Implemented         |
+| Check status, checking pieces, and unsafe king squares sent to clients | Implemented, tested |
+| Resignation                                                            | Implemented, tested |
+| Draw offers, acceptance, and claims                                    | Implemented, tested |
 
 The sections below say which behavior is planned when it is described.
 
@@ -50,10 +50,11 @@ A move is sent as the opaque `encoded_action` of an `ActionRequest`. For chess i
 - `e1g1` is castling. It is written as the king's two-square move, and the server moves the rook.
 - `e2e4(=)` plays the move and offers a draw. Any move can carry the `(=)` suffix.
 - `(=)` alone accepts the draw offered with the opponent's last move. It is legal only when an offer is pending.
+- `resign` resigns the match. Either player may send it at any time, including when it is not their turn; it is the only action accepted out of turn. A spectator who sends it receives `ERROR_CODE_ILLEGAL_ACTION`.
 
 Any move declines a pending offer, and a move marked `(=)` replaces it with an offer of the mover's own. A draw cannot be offered without a move, because only the player to move is permitted to send messages.
 
-The server only reads UCI. Clients never send SAN. Resignation and draw offers are not part of the client message format yet.
+The server only reads UCI. Clients never send SAN.
 
 A move is accepted only if all of these hold:
 
@@ -70,12 +71,24 @@ A move is accepted only if all of these hold:
 After every accepted move, and once when the match starts, the server broadcasts the state. The state consists of:
 
 - The current game state in FEN notation
-- The status of the white king (in check, checkmate, none) *(planned)*
-- The status of the black king (in check, checkmate, none) *(planned)*
+- Annotations (see below): the last move, the move count, check status, and any pending draw offer
 - Previous moves in Standard Algebraic Notation (SAN)
 - Previous moves in Universal Chess Interface notation (UCI)
 
 Chess has no hidden information, so every recipient receives the same view.
+
+The annotations arrive in `StateUpdate.annotations`, so the view stays a plain FEN. A key is absent when it does not apply.
+
+| Key           | Value                                                                                                     |
+|---------------|-----------------------------------------------------------------------------------------------------------|
+| `plies`       | Always present. Moves played so far, counting each side's move, such as `3`                               |
+| `last_move`   | The last move in UCI without any `(=)`, such as `e2e4` or `e7e8q`                                         |
+| `check`       | `white` or `black`: the color of the king in check, which is always the side to move                      |
+| `checkers`    | Squares of the pieces giving check, alphabetical and comma-separated, such as `b4,d3`                     |
+| `king_unsafe` | Squares next to the king to move which the opponent attacks, such as `d2,f2`. Squares held by the king's own pieces are left out. The king is taken off the board when looking, so a square behind it on a checking line is listed, and so is a defended enemy piece the king cannot capture |
+| `draw_offer`  | The ID of the player whose draw offer is pending, which is the opponent of the player to move              |
+
+`king_unsafe` lists squares attacked by the opponent, not legal moves. Pins and other limits on the king's moves still apply, and `LegalActionsRequest` is the authority on those.
 
 The FEN string has six fields: piece placement (rank 8 first), the color to move, castling rights (`KQkq` or `-`), the en passant target square (or `-`), the halfmove clock, and the fullmove number. The en passant target is set after every two-square pawn push, whether or not a capture is possible. The starting position is:
 
@@ -107,11 +120,12 @@ When a match ends, the clients receive:
 | `STALEMATE`             | `1/2-1/2`      | The player to move has no legal move and their king is not attacked                                                                                 |
 | `INSUFFICIENT_MATERIAL` | `1/2-1/2`      | Neither player can checkmate: king against king, king and one bishop or knight against king, or only bishops which all stand on one color of square |
 | `AUTOMATIC_DRAW`        | `1/2-1/2`      | 75 moves (150 halfmoves) without a pawn move or capture, or the same position occurs for the third time                                             |
-| `RESIGNATION`           | `1-0` or `0-1` | A player left the game. The other player wins *(planned)*                                                                                           |
+| `RESIGNATION`           | `1-0` or `0-1` | A player sent `resign`. The other player wins                                                                                                       |
 | `MUTUAL_DRAW_OFFER`     | `1/2-1/2`      | An offer was accepted, or an offer claimed a draw after 100 halfmoves or on the third repetition                                                    |
 
 Notes:
 
+- The reason names above are sent as `MatchResult.termination_reason`.
 - Checkmate takes priority over every automatic draw. A move which mates on the 150th halfmove is a win.
 - As in FIDE, threefold repeition and the 50-move rule are claims: the player to move claims by sending a move marked `(=)`, and the game ends at once. Fivefold repetition and 75 moves end the game with no offer. 
 - Insufficient material is checked only for positions in which no checkmate can ever occur. Two knights against a bare king is not declared a draw, because mate is possible if the defender blunders.
@@ -193,6 +207,7 @@ Read left to right, a piece move is: SYMBOL, FILE, RANK (the last two only when 
 | `piece.go`      | Colors, piece types, and the movement patterns each piece follows                                                        |
 | `action.go`     | `Move`, UCI decoding and encoding, SAN output                                                                            |
 | `outcome.go`    | Termination reasons and `ChessResult`                                                                                    |
+| `annotations.go`| Annotations sent next to the view, and the out-of-turn resign hook                                                       |
 | `chess_test.go` | Unit, perft, adversarial, and end-to-end tests                                                                           |
 
 Design notes:

@@ -35,6 +35,12 @@ func (g *Game) NewState(order []string, roles map[string]game.Role) game.GameSta
 
 func (g *Game) Validate(s game.GameState, a game.Action) error {
 	state := s.(State)
+	if isResign(a.Payload) {
+		if _, ok := state.playerColor(a.ActorID); !ok {
+			return fmt.Errorf("%w: only a player can resign", game.ErrIllegalAction)
+		}
+		return nil // Either player may resign at any time
+	}
 	if a.ActorID != state.activePlayer() {
 		return fmt.Errorf("%w: it is not %q's turn", game.ErrIllegalAction, a.ActorID)
 	}
@@ -51,11 +57,19 @@ func (g *Game) Validate(s game.GameState, a game.Action) error {
 // Assumes Validate accepted the action. A payload which cannot be decoded leaves the state unchanged
 func (g *Game) Apply(s game.GameState, a game.Action) game.GameState {
 	state := s.(State)
+	if isResign(a.Payload) {
+		return state.resign(a.ActorID)
+	}
 	m, err := state.moveFromPayload(a.Payload)
 	if err != nil {
 		return state
 	}
 	return state.apply(m)
+}
+
+// Resigning is the only action players may submit out of turn
+func (g *Game) AllowsOutOfTurn(_ game.GameState, a game.Action) bool {
+	return isResign(a.Payload)
 }
 
 func (g *Game) ActiveTurn(s game.GameState) []string {

@@ -88,3 +88,16 @@ type ActionSpec struct {
 	Payload     []byte
 	Description string
 }
+
+// Optional interface for a Game in which some actions, like resigning, may be
+// submitted by a member who is not in ActiveTurn. Turn checking will be skipped
+// when AllowsOutOfTurn returns true, but Validate is still called.
+type OutOfTurnActions interface {
+	AllowsOutOfTurn(state GameState, action Action) bool
+}
+
+// Optional interface for a Game which exposes small facts about a state as
+// StateUpdate.annotations. Must depend only on state and memberID
+type Annotator interface {
+	Annotations(state GameState, memberID string) map[string]string
+}

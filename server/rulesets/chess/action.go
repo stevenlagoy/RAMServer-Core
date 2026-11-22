@@ -22,8 +22,8 @@ type Move struct {
 	Promotion    *PieceType
 }
 
-// Get the UCI representation of this move. Includes From UCI, To UCI, and promotion type symbol. Example: `a7a8q`
-func (m Move) toUCI() string {
+// Get the UCI representation of this move without any draw offer mark
+func (m Move) squaresUCI() string {
 	result := ""
 	if m.From != nil && m.To != nil {
 		result = m.From.toUCI() + m.To.toUCI()
@@ -31,6 +31,12 @@ func (m Move) toUCI() string {
 	if m.Promotion != nil {
 		result += string(unicode.ToLower(m.Promotion.symbol))
 	}
+	return result
+}
+
+// Get the UCI representation of this move. Includes From UCI, To UCI, and promotion type symbol. Example: `a7a8q`
+func (m Move) toUCI() string {
+	result := m.squaresUCI()
 	if m.offeringDraw {
 		result += drawOfferMark
 	}
@@ -48,6 +54,7 @@ const (
 	checkMark       = "+"
 	checkmateMark   = "#"
 	drawOfferMark   = "(=)"
+	resignMark      = "resign"
 	castleKingside  = "0-0"   // SAN uses 0-0, PGN uses O-O
 	castleQueenside = "0-0-0" // SAN uses 0-0-0, PGN uses O-O-O
 )
@@ -131,6 +138,11 @@ func (s State) disambiguation(m Move) string {
 	default:
 		return m.From.toUCI()
 	}
+}
+
+// Whether a payload is the resignation action, which is not a move
+func isResign(payload []byte) bool {
+	return string(payload) == resignMark
 }
 
 // Decode an ASCII UCI payload: four characters ("e2e4") or five with a promotion piece ("e7e8q").
