@@ -48,14 +48,3 @@ data/
 .vscode/
 .idea/
 *.swp
-
-# Python (client-2)
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-
-# Java (client-1)
-target/
-build/
-*.class
