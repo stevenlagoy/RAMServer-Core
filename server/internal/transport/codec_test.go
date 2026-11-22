@@ -279,12 +279,34 @@ func TestEncodeMatchResult(t *testing.T) {
 	}
 }
 
+func TestDecodeCreateSessionFields(t *testing.T) {
+	msg := encodeAndDecode(t, &pb.ClientMessage{
+		Sequence: 2,
+		Payload: &pb.ClientMessage_JoinSessionRequest{JoinSessionRequest: &pb.JoinSessionRequest{
+			GameId: "chess", CreateNew: true, PrivateSession: true,
+		}},
+	})
+	if msg.Kind != KindJoinSession || msg.GameID != "chess" || msg.SessionID != "" || !msg.CreateNew || !msg.PrivateSession {
+		t.Fatalf("unexpected decode: %+v", msg)
+	}
+}
+
 func TestDecodeSetReadyRequest(t *testing.T) {
 	msg := encodeAndDecode(t, &pb.ClientMessage{
 		Sequence: 5,
 		Payload:  &pb.ClientMessage_SetReadyRequest{SetReadyRequest: &pb.SetReadyRequest{SessionId: "s1", Ready: true}},
 	})
 	if msg.Kind != KindSetReady || msg.Sequence != 5 || msg.SessionID != "s1" || !msg.Ready {
+		t.Fatalf("unexpected decode: %+v", msg)
+	}
+}
+
+func TestDecodeListSessionsRequest(t *testing.T) {
+	msg := encodeAndDecode(t, &pb.ClientMessage{
+		Sequence: 9,
+		Payload:  &pb.ClientMessage_ListSessionsRequest{ListSessionsRequest: &pb.ListSessionsRequest{GameId: "chess"}},
+	})
+	if msg.Kind != KindListSessions || msg.Sequence != 9 || msg.GameID != "chess" {
 		t.Fatalf("unexpected decode: %+v", msg)
 	}
 }
@@ -296,6 +318,80 @@ func TestDecodeLegalActionsRequest(t *testing.T) {
 	})
 	if msg.Kind != KindLegalActions || msg.Sequence != 6 || msg.SessionID != "s1" {
 		t.Fatalf("unexpected decode: %+v", msg)
+	}
+}
+
+func TestDecodeMatchHistoryRequest(t *testing.T) {
+	msg := encodeAndDecode(t, &pb.ClientMessage{
+		Sequence: 10,
+		Payload:  &pb.ClientMessage_MatchHistoryRequest{MatchHistoryRequest: &pb.MatchHistoryRequest{SessionId: "s1"}},
+	})
+	if msg.Kind != KindMatchHistory || msg.Sequence != 10 || msg.SessionID != "s1" {
+		t.Fatalf("unexpected decode: %+v", msg)
+	}
+}
+
+func TestEncodeStateUpdateLobbyFields(t *testing.T) {
+	state := decodeServerMessage(t, EncodeStateUpdate(0, StateUpdate{
+		SessionID: "s1",
+		Players: []SessionPlayer{
+			{PlayerID: "p1", DisplayName: "Alice", Connected: true, Ready: true, Role: "player"},
+			{PlayerID: "p2", DisplayName: "Bob", Role: "spectator"},
+		},
+		OwnerPlayerID: "p1",
+		Annotations:   map[string]string{"check": "white", "checkers": "b4,d3"},
+	})).GetStateUpdate()
+	if state.GetOwnerPlayerId() != "p1" || state.GetAnnotations()["check"] != "white" || state.GetAnnotations()["checkers"] != "b4,d3" {
+		t.Fatalf("unexpected owner or annotations: %v", state)
+	}
+	players := state.GetPlayers()
+	if len(players) != 2 || !players[0].GetReady() || players[0].GetRole() != "player" || players[1].GetReady() || players[1].GetRole() != "spectator" {
+		t.Fatalf("unexpected roster: %v", players)
+	}
+}
+
+func TestEncodeMatchResultTerminationReasonAndTurns(t *testing.T) {
+	m := decodeServerMessage(t, EncodeMatchResult(MatchResult{
+		SessionID: "s1", WinnerPlayerIDs: []string{"p1"}, Reason: EndCompleted, TerminationReason: "RESIGNATION", Turns: 31,
+	})).GetMatchResult()
+	if m.GetTerminationReason() != "RESIGNATION" || m.GetTurns() != 31 {
+		t.Fatalf("unexpected match result: %v", m)
+	}
+}
+
+func TestEncodeListSessionsResponse(t *testing.T) {
+	resp := decodeServerMessage(t, EncodeListSessionsResponse(8, []SessionInfo{{
+		SessionID:     "s1",
+		GameID:        "chess",
+		Status:        StatusWaiting,
+		Players:       []SessionPlayer{{PlayerID: "p1", DisplayName: "Alice", Connected: true, Role: "player"}},
+		OwnerPlayerID: "p1",
+		Joinable:      true,
+	}}))
+	if resp.GetInReplyTo() != 8 {
+		t.Fatalf("in_reply_to = %d, want 8", resp.GetInReplyTo())
+	}
+	sessions := resp.GetListSessionsResponse().GetSessions()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %v", sessions)
+	}
+	if s := sessions[0]; s.GetSessionId() != "s1" || s.GetGameId() != "chess" || s.GetStatus() != StatusWaiting ||
+		s.GetOwnerPlayerId() != "p1" || !s.GetJoinable() || len(s.GetPlayers()) != 1 || s.GetPlayers()[0].GetRole() != "player" {
+		t.Fatalf("unexpected session info: %v", s)
+	}
+}
+
+func TestEncodeMatchHistoryResponse(t *testing.T) {
+	resp := decodeServerMessage(t, EncodeMatchHistoryResponse(11, "s1", []MatchResult{
+		{SessionID: "s1", WinnerPlayerIDs: []string{"p1"}, Reason: EndCompleted, TerminationReason: "CHECKMATE", Turns: 40},
+		{SessionID: "s1", Draw: true, Reason: EndCompleted, TerminationReason: "STALEMATE", Turns: 70},
+	}))
+	history := resp.GetMatchHistoryResponse()
+	if resp.GetInReplyTo() != 11 || history.GetSessionId() != "s1" || len(history.GetMatches()) != 2 {
+		t.Fatalf("unexpected history response: %v", resp)
+	}
+	if m := history.GetMatches()[1]; !m.GetDraw() || m.GetTerminationReason() != "STALEMATE" || m.GetTurns() != 70 {
+		t.Fatalf("unexpected second match: %v", m)
 	}
 }
 

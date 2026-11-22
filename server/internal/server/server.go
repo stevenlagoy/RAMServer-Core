@@ -92,7 +92,7 @@ func Serve(
 	sem := make(chan struct{}, config.MaxConnections)
 	var wg sync.WaitGroup
 
-	sessions := session.NewSessionStore(store)
+	sessions := session.NewSessionStore(ctx, store)
 
 	go func() {
 		<-ctx.Done()

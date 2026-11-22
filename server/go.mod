@@ -16,4 +16,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.8.2 // indirect
 	modernc.org/sqlite v1.36.3 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 )

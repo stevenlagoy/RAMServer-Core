@@ -1,6 +1,6 @@
 # RAMServer Wire Protocol - v1
 
-Protocol Version: 1.1
+Protocol Version: 1.2
 
 Schema file: [`proto/ramserver/v1/ramserver.proto`](../proto/ramserver/v1/ramserver.proto) (package `ramserver.v1`, `proto3` syntax)
 
@@ -13,6 +13,7 @@ This document explains every message, field, and enum in the schema, and the ord
 | Envelopes                   | `ClientMessage`, `ServerMessage`                                    |
 | Connection & authentication | `ConnectRequest`, `ConnectResponse`, `AuthRequest`, `AuthResponse`  |
 | Session membership          | `JoinSessionRequest`, `LeaveSessionRequest`, `LeaveSessionResponse` |
+| Session discovery & history | `ListSessionsRequest`, `ListSessionsResponse`, `SessionInfo`, `MatchHistoryRequest`, `MatchHistoryResponse` |
 | Session readiness           | `SetReadyRequest`                                                   |
 | Session actions & state     | `ActionRequest`, `LegalActionsRequest`, `LegalActionsResponse`, `LegalActionSpec`, `StateUpdate`, `SessionPlayer`, `SessionStatus` |
 | Errors                      | `ErrorResponse`, `ErrorCode`                                        |
@@ -42,6 +43,8 @@ Each frame payload (see [framing.md](framing.md)) is one serialized envelope: `C
 | 6   | `action_request`        | `ActionRequest`       |
 | 7   | `set_ready_request`     | `SetReadyRequest`     |
 | 8   | `legal_actions_request` | `LegalActionsRequest` |
+| 9   | `list_sessions_request` | `ListSessionsRequest` |
+| 10  | `match_history_request` | `MatchHistoryRequest` |
 
 - `sequence` - a client-assigned, monotonically increasing counter used to correlate a response with the request that caused it.
 
@@ -57,6 +60,8 @@ Each frame payload (see [framing.md](framing.md)) is one serialized envelope: `C
 | 6   | `match_result`           | `MatchResult`          |
 | 7   | `leave_session_response` | `LeaveSessionResponse` |
 | 8   | `legal_actions_response` | `LegalActionsResponse` |
+| 9   | `list_sessions_response` | `ListSessionsResponse` |
+| 10  | `match_history_response` | `MatchHistoryResponse` |
 
 - `in_reply_to` - echoes the `sequence` of the client message this is a direct response to. For unsolicited server pushes, such as broadcasts to everyone in a session, this is `0`. Clients should therefore start `sequence` at `1`.
 
@@ -71,6 +76,8 @@ Each frame payload (see [framing.md](framing.md)) is one serialized envelope: `C
 | `ActionRequest`       | The requester's copy of the `StateUpdate` broadcast produced by the action |
 | `SetReadyRequest`     | The requester's copy of the `StateUpdate` broadcast produced by the change |
 | `LegalActionsRequest` | `LegalActionsResponse`                                                     |
+| `ListSessionsRequest` | `ListSessionsResponse`                                                     |
+| `MatchHistoryRequest` | `MatchHistoryResponse`                                                     |
 
 Other players' copies of the same broadcast carry `in_reply_to = 0`. A client can therefore treat any reply with a matching `in_reply_to` as the outcome of its request.
 
@@ -144,6 +151,10 @@ A **session** is one instance of a game, from the moment it is created until it 
 | `ActionRequest`        | client → server                                           | A player submits a game-defined action, in any phase: a start vote, a move, etc. |
 | `LegalActionsRequest`  | client → server                                           | A player asks which actions they may take right now.                             |
 | `LegalActionsResponse` | server → client                                           | In reply to `LegalActionsRequest`.                                               |
+| `ListSessionsRequest`  | client → server                                           | A player asks which sessions can currently be joined.                            |
+| `ListSessionsResponse` | server → client                                           | In reply to `ListSessionsRequest`.                                               |
+| `MatchHistoryRequest`  | client → server                                           | A client asks for the match history of their session.                            |
+| `MatchHistoryResponse` | server → client                                           | In reply to `MatchHistoryResponse`.                                               |
 | `StateUpdate`          | server → client (broadcast to all players in the session) | Whenever membership, connection status, session status, or game state changes.   |
 | `ErrorResponse`        | server → client                                           | A request is rejected, or any other protocol-level error occurs.                 |
 | `MatchResult`          | server → client (broadcast to all players in the session) | The match ends, normally or otherwise.                                           |
@@ -158,6 +169,8 @@ The core and the game split responsibility:
 
 - `game_id` - the game to play: `"tictactoe"`, `"chess"`, or `"gofish"`. An unregistered value is rejected with `ERROR_CODE_UNKNOWN_GAME`.
 - `session_id` - when non-empty, requests a specific session (`ERROR_CODE_SESSION_NOT_FOUND` if it does not exist). When empty, asks the server to select or create a session according to the game's policy.
+- `create_new` - when `true`, the server always creates a new session for `game_id` instead of joining an open one. It must not be combined with `session_id`; otherwise the request is rejected with `ERROR_CODE_INVALID_ARGUMENT`.
+- `private_session` - requires `create_new`. A private session is never returned by `ListSessionsRequest` and is never chosen when a join leaves `session_id` empty; players join it by `session_id`. Sessions created any other way are public.
 - A player can be a member of only one session at a time. A join while already a member of a session is rejected with `ERROR_CODE_ALREADY_IN_SESSION`; leave first.
 - If the session cannot accept the player, for example because it has already started, has closed, or is full, the join is rejected with `ERROR_CODE_SESSION_NOT_JOINABLE`.
 - On success, the server broadcasts a `StateUpdate` to the session, including the new player. The requester's copy is its reply, and it carries the server-assigned `session_id`.
@@ -213,6 +226,29 @@ A rejected action leaves the session state unchanged and produces no `StateUpdat
 - `payload` - the action, in the same game-defined encoding an `ActionRequest`'s `encoded_action` uses, so a client can send it back unchanged.
 - `description` - optional human-readable label for display.
 
+**`ListSessionsRequest`**
+
+- `game_id` - only list sessions for this game; empty lists every game. May be sent in any phase after authentication, including by a player who is already in a session.
+
+**`ListSessionsResponse`**
+
+- `sessions` - every public session which has at least one member, as `SessionInfo`, in a stable order.
+
+**`SessionInfo`**
+
+- `session_id`, `game_id`, `status`, `players`, `owner_player_id` - as in `StateUpdate`.
+- `joinable` - `true` if a `JoinSessionRequest` for this session would be accepted right now: the match has not started and the game has a role with room.
+
+**`MatchHistoryRequest`**
+
+- `session_id` - a session the sender is a member of; otherwise `ERROR_CODE_NOT_IN_SESSION`.
+
+**`MatchHistoryResponse`**
+
+- `session_id` - the session described.
+- `matches` - the `MatchResult` of each match finished in the session, oldest first. Empty until a match ends. The history is kept only while the server runs.
+
+
 **`StateUpdate`**
 
 - `session_id` - the session this snapshot describes.
@@ -223,12 +259,16 @@ A rejected action leaves the session state unchanged and produces no `StateUpdat
 - `encoded_view` - opaque bytes: a per-recipient view of game-defined state. While waiting, it might hold an owner, vote totals, a countdown, or player-count limits; in progress, the board or hand. Because it is per-recipient, a game with hidden information, such as a Go Fish hand, sends each player only what they are allowed to see. Game-specific roles, such as which side a player has in chess or whether they are X or O, are also part of the view; the core protocol has no role field.
 - `active_player_id` - whose turn it is now; empty when no player has the turn, such as while the session is waiting.
 - `player_order` - the full turn order; empty until the game sets one. Needed for games with more than two players, where "next turn" is not just "the other player."
+- `owner_player_id` - the session's owner: the first member to join who is still present.
+- `annotations` - small game-defined key/value strings about the state, readable without parsing `encoded_view`. Empty while the session is waiting. A game documents its own keys; clients ignore keys they do not know. Unlike `encoded_view`, annotations are optional for a game to provide.
 
 **`SessionPlayer`**
 
 - `player_id` - the player's server-issued identity.
 - `display_name` - the player's cosmetic label from `AuthRequest`.
 - `connected` - `false` while the player's connection is down and the server is waiting for them to resume; see **Disconnects** above.
+- `ready` - `true` once the player has sent `SetReadyRequest` with `ready: true`. Readiness is cleared for everyone when a match ends.
+- `role` - the game-defined role assigned at join, such as `"player"` or `"spectator"`. Roles are assigned in join order from the roles the game declares, so a game with two player seats gives the first two members the player role.
 
 **`SessionStatus`**
 
@@ -259,8 +299,7 @@ Usable in any phase. When it answers a specific request, the envelope's `in_repl
 | `ERROR_CODE_UNKNOWN_GAME`             | 3   | `game_id` has no registered game.                                                                                                  |
 | `ERROR_CODE_SESSION_NOT_FOUND`        | 4   | `session_id` does not exist.                                                                                                       |
 | `ERROR_CODE_SESSION_NOT_JOINABLE`     | 5   | The session refused a join: already started, closed, full, or refused by the game's admission rules.                               |
-| `ERROR_CODE_OUT_OF_TURN`              | 6   | Action submitted by a player who is not `active_player_id`.                                                                        |
-| `ERROR_CODE_ILLEGAL_ACTION`           | 7   | Action refused by the game in the session's current phase.                                                                         |
+| `ERROR_CODE_OUT_OF_TURN`              | 6   | Action submitted by a player who is not `active_player_id`, where the game does not allow that action out of turn (a game may, for example, let either player resign at any time). || `ERROR_CODE_ILLEGAL_ACTION`           | 7   | Action refused by the game in the session's current phase.                                                                         |
 | `ERROR_CODE_MALFORMED_MESSAGE`        | 8   | An envelope, or an opaque action payload, could not be parsed.                                                                     |
 | `ERROR_CODE_INVALID_STATE`            | 9   | Message not valid in the current phase, such as `JoinSessionRequest` before `AuthResponse`, a second `ConnectRequest`, or `SetReadyRequest` after the match has started. |
 | `ERROR_CODE_NOT_IN_SESSION`           | 10  | The session exists, but the sender is not a member of it.                                                                          |
@@ -276,6 +315,8 @@ Usable in any phase. When it answers a specific request, the envelope's `in_repl
 - `draw` - `true` if the match ended without a winner.
 - `summaries` - one `PlayerActionSummary` per player, pulled from the persisted action log. This is useful for the demo and testing requirement to show that illegal actions were rejected.
 - `reason` - why the match ended; see `MatchEndReason` below.
+- `termination_reason` - the game's own name for how the match ended, such as `CHECKMATE` or `RESIGNATION`. Empty if the game does not give one. `reason` stays a generic category.
+- `turns` - how many actions were applied during the match.
 
 **`MatchEndReason`**
 
