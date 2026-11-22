@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log"
 	"net/http"
 
@@ -10,8 +11,8 @@ import (
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
 
-func NewWebSocketHandler(config ServerConfig, games *game.Registry) http.Handler {
-	sessions := session.NewSessionStore()
+func NewWebSocketHandler(ctx context.Context, config ServerConfig, games *game.Registry) http.Handler {
+	sessions := session.NewSessionStore(ctx)
 	upgrader := websocket.Upgrader{
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,

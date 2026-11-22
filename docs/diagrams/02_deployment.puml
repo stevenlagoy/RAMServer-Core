@@ -1,0 +1,61 @@
+@startuml 02_deployment
+title Deployment Context
+skinparam shadowing false
+skinparam node<<planned>> {
+  BackgroundColor #EEEEEE
+  BorderColor #888888
+}
+skinparam artifact<<planned>> {
+  BackgroundColor #EEEEEE
+  BorderColor #888888
+}
+skinparam database<<planned>> {
+  BackgroundColor #EEEEEE
+  BorderColor #888888
+}
+
+node "Player workstation (Windows or Linux)" as WS {
+  artifact "Java chess client" as JC
+  artifact "Python chess client\n(Pygame)" as PC
+  artifact "Go Fish clients\n(Node & TypeScript, C++)" as GF <<planned>>
+  artifact "leanclient\n(Go CLI)" as LC
+}
+
+node "Docker host (LAN)" as DH {
+  node "Container: ramserver\nalpine:3.20, user uid 10001" as CT {
+    artifact "ramserver binary\nCGO_ENABLED=0, listens on :9000\nenv: RAMSERVER_ADDR, RAMSERVER_AUTOREADY (debug)" as BIN
+    database "SQLite file\n/app/data/*.db" as DB <<planned>>
+  }
+  database "Docker volume\nramserver-data" as VOL
+}
+
+node "Docker build (multi-stage)" as BLD {
+  artifact "Stage 1: golang:1.24-alpine\nbuf 1.73.0 generate, go build" as S1
+  artifact "Stage 2: alpine:3.20\ncopy binary only" as S2
+}
+
+node "GitHub" as GH {
+  artifact "GitHub Actions\nbuild, go vet, golangci-lint,\ngo test -race, buf lint, buf breaking" as CI
+  artifact "Repository, Projects,\nbranch protection, CODEOWNERS" as REPO
+}
+
+node "Google Cloud VM (stretch goal)" as GCP <<planned>> {
+  artifact "Same container image\nTLS required (NFR-10)" as GIMG <<planned>>
+}
+
+JC --> BIN : Protobuf over TCP :9000
+PC --> BIN : Protobuf over TCP :9000
+GF ..> BIN : Protobuf over TCP :9000
+LC --> BIN : Protobuf over TCP :9000
+BIN ..> DB : in-process
+DB -- VOL : mounted
+S1 --> S2 : copy /out/ramserver
+S2 --> CT : image
+REPO --> CI : push, pull request
+CI ..> S1 : builds image
+GCP ..> CT : hosts image (optional)
+note right of CT
+  Only the server is containerized.
+  Clients run natively (NFR-13).
+end note
+@enduml

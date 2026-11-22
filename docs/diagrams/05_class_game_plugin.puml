@@ -1,0 +1,157 @@
+@startuml 05_class_game_plugin
+title Class Diagram: Game Plugin API and Chess Ruleset
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+hide empty members
+
+package "game (public plugin API)" {
+  interface Game {
+    +Roles() []RoleSpec
+    +NewState(rosterOrder, roles) GameState
+    +LegalActions(state, memberID) []ActionSpec
+    +Validate(state, action) error
+    +Apply(state, action) GameState
+    +ActiveTurn(state) []string
+    +Outcome(state) (MatchResult, bool)
+    +ReadyToStart(roster, ready) bool
+    +ViewFor(state, memberID) []byte
+  }
+  class Registry {
+    -games : map[string]Factory
+    +Register(name, factory)
+    +New(name) (Game, error)
+    +Names() []string
+  }
+  class RoleSpec {
+    +Name : Role
+    +Min : int
+    +Max : int
+  }
+  class Action {
+    +ID : uint64
+    +ActorID : string
+    +Payload : []byte
+  }
+  class ActionSpec {
+    +Payload : []byte
+    +Description : string
+  }
+  interface MatchResult {
+    +GetWinnerIDs() []string
+    +TerminationReason() TerminationReason
+  }
+  class Result {
+    +WinnerIDs : []string
+    +Scores : map[string]float32
+    +Reason : TerminationReason
+    +IsDraw() bool
+  }
+  class "GameState = any" as GameState <<type>>
+  class Errors <<variables>> {
+    +ErrIllegalAction
+    +ErrMalformedAction
+  }
+}
+
+package "rulesets/chess" {
+  class "chess.Game" as ChessGame {
+    +Roles() : player x2, spectator unlimited
+    +Validate(state, action) error
+    +Apply(state, action) GameState
+    +Outcome(state) (MatchResult, bool)
+    +ViewFor(state, memberID) []byte
+    +LegalActions(state, memberID) []ActionSpec
+  }
+  class State <<immutable value>> {
+    -board : [64]*Square
+    -pieces : []*Piece
+    -turn : Color
+    -castling : uint8
+    -enPassant : *Square
+    -halfmove, fullmove : int
+    -whitePlayer, blackPlayer : string
+    -stateHistory : []string
+    -moveHistory : []Move
+    -activeDrawOffer, drawAccepted : bool
+    +ToFEN() string
+    -isLegal(move) bool
+    -apply(move) State
+    -makeMove(move) State
+    -outcome() (MatchResult, bool)
+    -legalActionSpecs(id) []ActionSpec
+  }
+  class Square {
+    -rank, file : uint8
+    -occupant : *Piece
+  }
+  class Piece {
+    -pieceType : PieceType
+    -color : Color
+    -position : *Square
+  }
+  class PieceType {
+    -name : string
+    -symbol : rune
+    -canPromote : bool
+  }
+  class MovementPattern {
+    -name : string
+    -captures : captureRule
+    -evaluate(from, to, state) bool
+    -squaresInPath(from, to) []Square
+    -unattacked(from, to) []Square
+  }
+  class Color {
+    -name : string
+    -movementDirection : int
+    -backrank, pawnrank, promotionRank : uint8
+  }
+  class Move {
+    +From, To : *Square
+    +Promotion : *PieceType
+    -offeringDraw : bool
+    +Encode() []byte
+    -toUCI() string
+    -toSAN(state) string
+  }
+  class ChessResult {
+    -loser : *string
+    -finalState : State
+    -toSAN() string
+  }
+  class View {
+    +FEN : string
+    +Encode() []byte
+  }
+}
+
+package "internal/testgame" {
+  class StubGame {
+    +EndAfter : int
+  }
+}
+
+Registry ..> Game : constructs via Factory
+Game ..> GameState
+Game ..> RoleSpec
+Game ..> ActionSpec
+Game ..> Action
+Game ..> MatchResult
+Result ..|> MatchResult
+ChessGame ..|> Game
+StubGame ..|> Game
+ChessGame ..> State : GameState value
+ChessGame ..> Move : decodes payload
+ChessGame ..> View
+ChessGame ..> Errors
+State "1" *-- "64" Square
+State "1" o-- "0..32" Piece
+State "1" *-- "*" Move : moveHistory
+Piece --> PieceType
+Piece --> Color
+PieceType "1" o-- "*" MovementPattern
+Move --> Square
+ChessResult --|> Result : embeds
+ChessResult ..|> MatchResult
+State ..> ChessResult : outcome()
+@enduml

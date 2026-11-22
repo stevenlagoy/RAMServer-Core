@@ -1,0 +1,116 @@
+@startsalt wireframes
+title Client Wireframes (Screens 1-6)
+{+
+  {+
+  <b>Screen 1: Connect</b> (FR-37, UC-1)
+  --
+  <b>Chess
+  --
+  Server address | "127.0.0.1:9000        "
+  Display name   | "Player                "
+  .
+  [ Connect ]
+  --
+  <color:red>Error banner: "Cannot reach the server" or "This server uses an incompatible protocol version"
+  <i>Annotation: Connect sends ConnectRequest then AuthRequest.
+  <i>The button is disabled while the handshake runs.
+  }
+{+
+  <b>Screen 2: Lobby</b> (FR-9, FR-37, UC-2)
+  Signed in as <b>Alice
+  --
+  Game | ^chess^
+  [ Create session ]
+  --
+  <b>Open sessions  <i>(needs a list-sessions message, not in the protocol yet)
+  {#
+   Session | Players | Status | .
+   session-b3d4c64e | 1 of 2 | Waiting | [ Join ]
+   session-91acc0f2 | 2 of 2 | In progress | [ Full ]
+  }
+  --
+  Join by session ID | "session-                 " | [ Join ]
+  --
+  <color:red>Error banner: "Session not found" or "Session is full or already started"
+  <i>Annotation: Create and Join both send JoinSessionRequest.
+  <i>An empty session ID asks the server to pick or create a session.
+  }
+{+
+  <b>Screen 3: Waiting Room</b> (FR-13, FR-35, UC-2, UC-9)
+  Session <b>session-b3d4c64e</b> | [ Copy ID ]
+  Game: chess
+  --
+  <b>Players
+  {#
+   Seat | Name | Connected | Ready
+   1 | Alice (you) | Yes | Yes
+   2 | Bob | Yes | No
+  }
+  --
+  <i>Status: Waiting for Bob to be ready
+  [ Ready ] | [ Leave session ]
+  <i>Annotation: Ready sends SetReadyRequest.
+  <i>The match starts when the game reports ReadyToStart, then the client moves to Screen 4.
+  }
+{+
+  <b>Screen 4: Match</b> (FR-31, US-11, US-13)
+  {#
+   <size:22>r | <size:22>n | <size:22>b | <size:22>q | <size:22>k | <size:22>b | <size:22>n | <size:22>r
+   <size:22>p | <size:22>p | <size:22>p | <size:22>p | <size:22>p | <size:22>p | <size:22>p | <size:22>p
+   <size:22>· | <size:22>· | <size:22>· | <size:22>· | <size:22>· | <size:22>· | <size:22>· | <size:22>·
+   <size:22>· | <size:22>· | <size:22>· | <size:22>· | <size:22>· | <size:22>· | <size:22>· | <size:22>·
+   <size:22>· | <size:22>· | <size:22>· | <size:22>· | <size:22>P | <size:22>· | <size:22>· | <size:22>·
+   <size:22>· | <size:22>· | <size:22>· | <size:22>· | <size:22>· | <size:22>· | <size:22>· | <size:22>·
+   <size:22>P | <size:22>P | <size:22>P | <size:22>P | <size:22>· | <size:22>P | <size:22>P | <size:22>P
+   <size:22>R | <size:22>N | <size:22>B | <size:22>Q | <size:22>K | <size:22>B | <size:22>N | <size:22>R
+  }
+  <b>You: White</b>   Opponent: Bob (connected)
+  <b>Turn: Bob</b>  <i>(input disabled)
+  --
+  Moves: 1. e4
+  [ Offer draw ] | [ Accept draw ] | [ Resign ]
+  --
+  <color:red>Error banner: "It is not your turn" or "Illegal move"
+  <i>Annotation: Colour comes from player_order in StateUpdate.
+  <i>Pieces can be picked up only on your turn.
+  <i>An ErrorResponse snaps the piece back to its square.
+  }
+{+
+  <b>Screen 5: Result</b> (FR-18, FR-31, UC-6, UC-9)
+  <b>Checkmate: you win (1-0)
+  Reason: CHECKMATE
+  --
+  {#
+   Player | Actions accepted | Actions rejected
+   Alice | 22 | 0
+   Bob | 21 | 1
+  }
+  --
+  [ Ready for rematch ] | [ Leave session ]
+  <i>Annotation: Ready for rematch sends SetReadyRequest and returns to Screen 3.
+  <i>Leave sends LeaveSessionRequest and returns to Screen 2.
+  }
+{+
+  <b>Screen 6: Error States and Their Messages</b> (FR-23, UC-4, US-13)
+  {#
+   ErrorCode | Message shown | Client behaviour
+   INVALID_PROTOCOL_VERSION | This server uses an incompatible protocol version | Return to Screen 1
+   AUTH_FAILED | Could not sign in | Return to Screen 1
+   UNKNOWN_GAME | That game is not available | Stay on Screen 2
+   SESSION_NOT_FOUND | Session not found | Stay on Screen 2
+   SESSION_NOT_JOINABLE | Session is full or already started | Stay on Screen 2
+   ALREADY_IN_SESSION | You are already in a session | Go to Screen 3
+   NOT_IN_SESSION | You are not in that session | Return to Screen 2
+   OUT_OF_TURN | It is not your turn | Keep board, snap piece back
+   ILLEGAL_ACTION | Illegal move | Keep board, snap piece back
+   MALFORMED_MESSAGE | The move could not be read | Keep board, snap piece back
+   STALE_STATE | The board changed, try again | Re-enable input from newest state
+   INVALID_STATE | Request not valid right now | Show message only
+   INVALID_ARGUMENT | Check your input | Highlight the field
+   INTERNAL | Server error | Show message only
+   Unknown code | Error <code> | Show generic message
+   Connection closed | Connection lost | Return to Screen 1
+  }
+}
+}
+@endsalt

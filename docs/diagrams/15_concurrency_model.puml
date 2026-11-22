@@ -1,0 +1,45 @@
+@startuml 15_concurrency_model
+title Concurrency Model: Goroutines, Channels, and Ownership (supports NFR-24 session isolation)
+left to right direction
+skinparam shadowing false
+skinparam componentStyle rectangle
+
+component "Accept loop\n(Serve goroutine)" as Accept
+database "ipLimiter\nmutex-guarded counts" as IPL
+database "SessionStore\nmutex-guarded map" as SS
+
+node "Per connection (3 goroutines)" as Conn {
+  component "readLoop\n(Client.Run goroutine)\nread deadline, decode, dispatch" as RL
+  component "writeLoop\nping ticker, write deadline" as WL
+  component "context closer\nCloses socket when ctx is done" as CC
+  queue "out\nchan []byte, capacity OutQueueSize (32)" as Out
+}
+
+node "Per session (1 goroutine, the actor)" as Sess {
+  queue "inbox\nchan sessionMsg, unbuffered" as Inbox
+  component "Session.Run\nsole owner of members, order,\nhistory, current Match" as SR
+}
+
+cloud "Client socket" as Sock
+
+Accept --> IPL : allow / release
+Accept --> RL : go NewClient(conn).Run(ctx)
+RL --> SS : Create / Get
+RL --> Inbox : Join, Leave, SetReady, Submit\n(select with ctx.Done)
+Inbox --> SR
+SR --> Out : Sender.Send\nnon-blocking select
+Out --> WL
+WL --> Sock : WriteFrame
+Sock --> RL : ReadFrame
+CC ..> Sock : Close()
+
+note bottom of Out
+  If the queue is full the client is dropped by closing its socket,
+  so one slow client cannot stall a broadcast to the rest of the session.
+end note
+note bottom of SR
+  A panic inside Session.handle is recovered and logged,
+  so a faulty game cannot take down other sessions.
+  Match and GameState need no locks because only this goroutine touches them.
+end note
+@enduml

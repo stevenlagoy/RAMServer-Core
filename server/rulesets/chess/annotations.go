@@ -11,7 +11,7 @@ import (
 // Keys of annotations sent along with the FEN view. All values are strings
 const (
 	AnnotationPlies      = "plies"       // Number of moves played, always present
-	AnnotationLastMove   = "last_move"   // Lat move in UCI without any draw offer mark
+	AnnotationLastMove   = "last_move"   // Last move in UCI without any draw offer mark
 	AnnotationCheck      = "check"       // Color of the king in check
 	AnnotationCheckers   = "checkers"    // Squares of pieces giving check
 	AnnotationKingUnsafe = "king_unsafe" // Squares next to the king to move being attacked by opponent

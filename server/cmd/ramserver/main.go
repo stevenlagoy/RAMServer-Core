@@ -37,7 +37,7 @@ func main() {
 
 		httpServer := &http.Server{
 			Addr:              addr,
-			Handler:           server.NewWebSocketHandler(server.DefaultConfig(), games),
+			Handler:           server.NewWebSocketHandler(ctx, server.DefaultConfig(), games),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 

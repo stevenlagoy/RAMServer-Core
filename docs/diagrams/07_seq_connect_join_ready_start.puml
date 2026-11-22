@@ -1,0 +1,71 @@
+@startuml 07_seq_connect_join_ready_start
+title Sequence: Connect, Authenticate, Join, Ready, Match Start (UC-1, UC-2, UC-9)
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign left
+skinparam maxMessageSize 260
+
+actor "Client A" as A
+actor "Client B" as B
+participant "server.Client (A)" as CA
+participant "server.Client (B)" as CB
+participant "SessionStore" as SS
+participant "Session\n(actor)" as S
+participant "Match" as M
+participant "chess.Game" as G
+
+== Connect and authenticate (shown for A; B repeats the same steps on its own connection) ==
+A -> CA : TCP connect
+note right of CA : Serve checks the per-IP limit and the connection semaphore,\nthen starts NewClient(...).Run
+A -> CA : ConnectRequest(seq 1, protocol_version "1.0")
+CA -> CA : CompatibleVersion(major version equal)
+alt major version differs
+  CA --> A : ErrorResponse(INVALID_PROTOCOL_VERSION), connection closed after CloseTimeout
+else compatible
+  CA --> A : ConnectResponse(in_reply_to 1, connection_id)
+end
+A -> CA : AuthRequest(seq 2, display_name)
+CA -> CA : issue player_id and reconnect_token (random 128-bit IDs)
+CA --> A : AuthResponse(in_reply_to 2, player_id, reconnect_token)
+note over CA #FFF3CD
+  PLANNED: persist (player_id, token) so a later AuthRequest can resume.
+  Today a non-empty player_id or token is rejected with AUTH_FAILED.
+end note
+
+== Create a session (A) ==
+A -> CA : JoinSessionRequest(seq 3, game_id "chess", session_id "")
+note over CA #FFF3CD
+  OPEN PR "Join an open session when no session_id is given":
+  the game's policy first looks for a joinable public session.
+  Only if none exists is a new session created.
+end note
+CA -> CA : Registry.New("chess")
+CA -> SS : Create(newSessionID, "chess", game, public)
+SS -> S : start Run goroutine
+CA -> S : Join(clientID, displayName, seq 3, sender)
+S -> S : handleJoin: assignRole against RoleSpec limits,\nappend to join order, add Member
+S --> CA : nil (or ErrLobbyFull / ErrAlreadyStarted as SESSION_NOT_JOINABLE)
+S --> A : StateUpdate(in_reply_to 3, WAITING, players [A])
+
+== Join the session (B) ==
+B -> CB : JoinSessionRequest(seq 3, game_id "chess", session_id "")
+CB -> S : Join(clientID, displayName, seq 3, sender)
+S --> B : StateUpdate(in_reply_to 3, WAITING, players [A, B])
+S --> A : StateUpdate(in_reply_to 0, WAITING, players [A, B])
+
+== Readiness and match start ==
+A -> CA : SetReadyRequest(session_id, ready true)
+CA -> S : SetReady(clientID, true)
+S --> A : StateUpdate(WAITING, unsolicited)
+S --> B : StateUpdate(WAITING, unsolicited)
+note over S #FFF3CD : PR message. The reply rule for SetReady is not settled.
+B -> CB : SetReadyRequest(session_id, ready true)
+CB -> S : SetReady(clientID, true)
+S -> G : ReadyToStart(roster, ready)
+G --> S : true (two players, all ready)
+S -> M : NewMatch(game, join order copy, roles)
+M -> G : NewState(order, roles)
+G --> M : chess.State (start position, first joiner plays white)
+S --> A : StateUpdate(IN_PROGRESS, encoded_view = FEN, active_player_id = A, player_order [A, B])
+S --> B : StateUpdate(IN_PROGRESS, encoded_view = FEN, active_player_id = A, player_order [A, B])
+@enduml

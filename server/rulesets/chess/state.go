@@ -550,7 +550,7 @@ func (s State) apply(m Move) State {
 	return next
 }
 
-// Returns the State after the player with the given ID resigns. Board and history is unchanced
+// Returns the State after the player with the given ID resigns. Board and history are unchanged
 func (s State) resign(id string) State {
 	next := s.deepCopy()
 	next.resigned = id
