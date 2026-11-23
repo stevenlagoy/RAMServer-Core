@@ -7,7 +7,7 @@ other tools that communicate with the server core.
 Framing identifies the boundary and size of each message in TCP's byte
 stream. It does not define the contents of a non-empty payload. After reading
 a complete frame, pass its payload to the message parser defined by the
-[wire protocol](protocol.md).
+[wire protocol](../proto/README.md). Over WebSocket, the same frames are carried inside binary messages; see [WebSocket transport](websocket.md).
 
 ## Frame format
 
@@ -33,21 +33,10 @@ Every frame is a four-byte length prefix followed by the payload:
 
 ## Maximum payload size
 
-The maximum payload size is set by the `RAMSERVER_MAX_FRAME_BYTES`
-environment variable, in bytes. It limits the payload only; the four-byte
-prefix is not counted.
+The maximum payload size is **65,536 bytes (64 KiB)**, not counting the four-byte prefix, so a maximum-size frame occupies 65,540 bytes on the wire. The server does not currently allow changing it.
 
-| Variable                    | Default           | Allowed values                     |
-| --------------------------- | ----------------- | ---------------------------------- |
-| `RAMSERVER_MAX_FRAME_BYTES` | `65536` (64 KiB)  | Integer from `1` to `4294967295`   |
-
-- If the variable is unset or empty, the default is used.
-- If it is set to a value that is not an integer in the allowed range, the
-  server must refuse to start rather than fall back to the default.
-- The value must be the same on both ends of a connection. A client must not
-  send payloads larger than the server's maximum, and should be configured
-  with the same value so it accepts every frame the server may send. See
-  [`.env.example`](../.env.example).
+- A client must not send payloads larger than this; the server treats a larger length as a broken stream and closes the connection.
+- A client should accept every frame up to this size from the server.
 
 ## Reading frames
 
@@ -129,7 +118,7 @@ A heartbeat has no payload and is encoded as:
 
 Framing only returns payload bytes; it does not determine which message type
 they represent, validate fields, or provide message sequencing. Use the
-protocol schema and message lifecycle in [protocol.md](protocol.md) to
+protocol schema and message lifecycle in [the protocol reference](../proto/README.md) to
 serialize outgoing messages and parse incoming non-empty payloads. A
 successfully read frame is not necessarily a valid protocol message: report
 payload decoding or validation failures through the connection's normal

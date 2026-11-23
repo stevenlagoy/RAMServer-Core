@@ -85,17 +85,23 @@ The server listens on `localhost:8080`. Stop it with `Ctrl+C` and remove the con
 
 ### 4. Run the server without Docker (faster iteration)
 
-**Linux / macOS (bash)**
 ```bash
 cd server
-go run ./cmd/ramserver --addr :8080
+go run ./cmd/ramserver
 ```
 
-**Windows (cmd)**
-```cmd
-cd server
-go run .\cmd\ramserver --addr :8080
-```
+The server listens for TCP connections on `127.0.0.1:8080`. It's configured with environment variables:
+
+| Variable | Effect |
+| --- | --- |
+| `RAMSERVER_ADDR` | TCP address to listen on, default `127.0.0.1:8080`. |
+| `PORT` | If set, serve WebSocket connections at `ws://<host>:<PORT>/connect` instead of TCP (this is how the hosted server runs). |
+
+For example, on Linux, macOS or WSL: `PORT=8081 go run ./cmd/ramserver`. In PowerShell:
+`$env:PORT = "8081"; go run .\cmd\ramserver`.
+
+The hosted server is at `wss://ramserver-core-80752473398.us-east5.run.app/connect`. See
+[WebSocket transport](docs/websocket.md) for connecting to it.
 
 ### 5. Run the tests
 
@@ -151,9 +157,14 @@ Rebase your branch onto `main` before opening a pull request.
 
 ## Documentation
 
-- [Wire protocol specification](docs/protocol.md)
+- [Wire protocol specification](proto/README.md)
+- [Message framing](docs/framing.md)
+- [WebSocket transport](docs/websocket.md)
+- [Writing a ruleset](docs/writing-a-ruleset.md)
+- [Writing a client](docs/writing-a-client.md)
 - [Contributing guidelines](CONTRIBUTING.md)
 - [Project Proposal](docs/PROJECT-PROPOSAL.md)
 - [Team Policies](docs/TEAM-POLICIES.md)
 - [Requirements Specification](docs/REQUIREMENTS-SPECIFICATION.md)
 - [Chess Ruleset](server/rulesets/chess/README.md)
+- [Tic-Tac-Toe Ruleset](server/rulesets/tictactoe/README.md)
