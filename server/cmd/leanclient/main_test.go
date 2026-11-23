@@ -51,10 +51,24 @@ func TestParseCommand(t *testing.T) {
 			a := m.GetAuthRequest()
 			return a.GetPlayerId() == "p1" && a.GetReconnectToken() == "secret"
 		}},
+		{"play stub", "", func(m *pb.ClientMessage) bool {
+			j := m.GetJoinSessionRequest()
+			return j.GetGameId() == "stub" && j.GetSessionId() == "" && !j.GetCreateNew() && !j.GetPrivateSession()
+		}},
 		{"create stub", "", func(m *pb.ClientMessage) bool {
 			j := m.GetJoinSessionRequest()
-			return j.GetGameId() == "stub" && j.GetSessionId() == ""
+			return j.GetGameId() == "stub" && j.GetSessionId() == "" && j.GetCreateNew() && !j.GetPrivateSession()
 		}},
+		{"create stub private", "", func(m *pb.ClientMessage) bool {
+			j := m.GetJoinSessionRequest()
+			return j.GetGameId() == "stub" && j.GetCreateNew() && j.GetPrivateSession()
+		}},
+		{"list", "", func(m *pb.ClientMessage) bool {
+			return m.GetListSessionsRequest() != nil && m.GetListSessionsRequest().GetGameId() == ""
+		}},
+		{"list chess", "", func(m *pb.ClientMessage) bool { return m.GetListSessionsRequest().GetGameId() == "chess" }},
+		{"history", "s1", func(m *pb.ClientMessage) bool { return m.GetMatchHistoryRequest().GetSessionId() == "s1" }},
+		{"history s2", "", func(m *pb.ClientMessage) bool { return m.GetMatchHistoryRequest().GetSessionId() == "s2" }},
 		{"join stub s1", "", func(m *pb.ClientMessage) bool {
 			j := m.GetJoinSessionRequest()
 			return j.GetGameId() == "stub" && j.GetSessionId() == "s1"
@@ -93,15 +107,19 @@ func TestParseCommandRaw(t *testing.T) {
 }
 
 func TestParseCommandErrors(t *testing.T) {
-	for _, line := range []string{"auth", "auth Alice p1", "create", "create stub extra", "join stub", "join stub s1 extra", "leave", "action move", "action", "ready", "legal", "raw", "dance"} {
+	for _, line := range []string{
+		"auth", "auth Alice p1", "play", "play stub extra", "create", "create stub extra", "create stub private extra",
+		"join stub", "join stub s1 extra", "leave", "action move", "action", "ready", "legal",
+		"list chess extra", "history", "history s1 extra", "raw", "dance",
+	} {
 		if _, _, err := parseCommand(line, ""); err == nil {
 			t.Errorf("parseCommand(%q) succeeded with no session, want an error", line)
 		}
 	}
 }
 
-// dialTestServer starts a real server on a free port and returns a connection to it
-func dialTestServer(t *testing.T) net.Conn {
+// startTestServer starts a real server on a free port and returns its address
+func startTestServer(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -119,14 +137,78 @@ func dialTestServer(t *testing.T) net.Conn {
 		cancel()
 		<-done
 	})
+	return ln.Addr().String()
+}
 
-	conn, err := net.Dial("tcp", ln.Addr().String())
+// dial connects to addr, failing the test if the connection takes more than five seconds
+func dial(t *testing.T, addr string) net.Conn {
+	t.Helper()
+	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close() })
 	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	return conn
+}
+
+// dialTestServer starts a real server and returns a connection to it
+func dialTestServer(t *testing.T) net.Conn {
+	t.Helper()
+	return dial(t, startTestServer(t))
+}
+
+// authedClient connects to addr and completes the handshake as displayName
+func authedClient(t *testing.T, addr, displayName string) *client {
+	t.Helper()
+	c := newClient(dial(t, addr))
+	if _, err := c.handshake(transport.ProtocolVersion, displayName); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// runAndRead runs one command and returns the server's next message
+func runAndRead(t *testing.T, c *client, line string) *pb.ServerMessage {
+	t.Helper()
+	if err := c.runCommand(line); err != nil {
+		t.Fatalf("%s: %v", line, err)
+	}
+	resp, err := c.next()
+	if err != nil {
+		t.Fatalf("%s: %v", line, err)
+	}
+	return resp
+}
+
+// The protocol 1.2 commands against a real server: a private session is not listed and not joined by play,
+// list and history get their responses, and those responses have their own log labels
+func TestNewCommandsAgainstServer(t *testing.T) {
+	addr := startTestServer(t)
+	alice := authedClient(t, addr, "Alice")
+	bob := authedClient(t, addr, "Bob")
+
+	private := runAndRead(t, alice, "create stub private").GetStateUpdate().GetSessionId()
+	if private == "" {
+		t.Fatal("create stub private did not create a session")
+	}
+
+	resp := runAndRead(t, bob, "list stub")
+	if resp.GetListSessionsResponse() == nil || serverMessageKind(resp) != "SESSIONS" {
+		t.Fatalf("expected a SESSIONS response, got %s %v", serverMessageKind(resp), resp)
+	}
+	if sessions := resp.GetListSessionsResponse().GetSessions(); len(sessions) != 0 {
+		t.Fatalf("expected the private session to be unlisted, got %v", sessions)
+	}
+
+	if joined := runAndRead(t, bob, "play stub").GetStateUpdate().GetSessionId(); joined == "" || joined == private {
+		t.Fatalf("play stub joined %q, want a new session, not the private %q", joined, private)
+	}
+
+	resp = runAndRead(t, alice, "history")
+	if resp.GetMatchHistoryResponse().GetSessionId() != private || serverMessageKind(resp) != "HISTORY" {
+		t.Fatalf("expected a HISTORY response for %q, got %s %v", private, serverMessageKind(resp), resp)
+	}
 }
 
 // Runs the client against a real server: handshake, create a session, then leave it
