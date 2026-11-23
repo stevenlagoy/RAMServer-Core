@@ -1,0 +1,3 @@
+# Build output, the downloaded protocol schema and generated code: rebuild with make instead of committing
+build/
+/ttt

@@ -1,0 +1,341 @@
+# ttt: a tic-tac-toe client for RAMServer
+
+A C client that plays tic-tac-toe against other people through a RAMServer, either a local server over
+TCP (or WebSocket) or the hosted server over WebSocket with TLS. It runs in a terminal as a full-screen
+interface with colours, keyboard and mouse input, and box-drawn X and O pieces. A line-based mode is
+available for scripts, and a bot can play automatically.
+
+```
+ RAMServer ▸ tic-tac-toe                                       Ada  tcp://127.0.0.1:8080  ● online
+
+  ┌─────────┬─────────┬─────────┐    SESSION ─────────────────────────────────────────────────────
+  │  ╲   ╱  │  ╲   ╱  │  ╭───╮  │    s-1-df5bc7 private
+  │    ╳    │    ╳    │  │   │  │    Y copies the id. A friend joins with J.
+  │  ╱   ╲  │  ╱   ╲  │  ╰───╯  │
+  ├─────────┼─────────┼─────────┤    PLAYERS ─────────────────────────────────────────────────────
+  │         │  ╭───╮  │         │    X Ada (you)              ◀ to move   2 wins
+  │    4    │  │   │  │    6    │    O Bob                                1 win
+  │         │  ╰───╯ •│         │    1 watching: Cy
+  ├─────────┼─────────┼─────────┤    4 matches played, 1 drawn
+  │         │  ╭───╮  │  ╲   ╱  │
+  │    7    │  │   │  │    ╳    │     ▶ YOUR MOVE (X)
+  │         │  ╰───╯  │  ╱   ╲  │    Arrows/WASD + Enter, a digit 1-9, or click a cell.
+  └─────────┴─────────┴─────────┘
+
+ EVENTS ───────────────────────────────────────────────────────────────────────────────────────────
+ ✓ Match started: you are X and move first
+ · Bob ready
+ ! Bob wins by three in a row
+  ←↑→↓  move   Enter  place   1-9  place   F  resign   L  leave   ?  help
+```
+
+The game's encodings come from the [tic-tac-toe ruleset README](https://github.com/stevenlagoy/RAMServer-Core/blob/main/server/rulesets/tictactoe/README.md), and everything else from the protocol documentation in [RAMServer-Core](https://github.com/stevenlagoy/RAMServer-Core/blob/main/README.md#documentation).
+
+## Building
+
+Run these from this directory (`clients/tic-tac-toe`). On Debian, Ubuntu or WSL, install the dependencies:
+
+```bash
+sudo apt-get install build-essential pkg-config protobuf-compiler protobuf-c-compiler libprotobuf-c-dev \
+    libwebsockets-dev libssl-dev libcmocka-dev
+```
+
+and [`buf`](https://buf.build/docs/installation), then build:
+
+```bash
+make
+```
+
+This builds `build/<os>/ttt` and makes `./ttt` a link to it.
+
+The protocol schema isn't stored in this branch. The first build downloads it from RAMServer-Core's `main`
+branch with `buf export`, into `build/<os>/proto`, and generates the C code from it into `build/<os>/gen`.
+Neither is committed. Run `make proto` to fetch the latest schema again after the protocol changes.
+
+| Package | Used for |
+| --- | --- |
+| `build-essential`, `pkg-config` | the compiler and `make` |
+| `buf` | downloading the protocol schema |
+| `protobuf-compiler`, `protobuf-c-compiler`, `libprotobuf-c-dev` | generating and using the message code |
+| `libwebsockets-dev`, `libssl-dev` | WebSocket and TLS (`ws://`, `wss://`) |
+| `libcmocka-dev` | unit tests |
+| `valgrind` | `make memcheck` (optional) |
+
+Tested with Debian 12 (gcc 12.2, libwebsockets 4.1.6, protobuf-c 1.4.1, cmocka 1.1.5) and Ubuntu 24.04
+(gcc 13, libwebsockets 4.3.3, cmocka 1.1.7).
+
+## Running
+
+```bash
+./ttt
+```
+
+With no options, it asks which server to use and what to call you. To skip that screen:
+
+| Server | Command |
+| --- | --- |
+| Local server, TCP mode (`RAMSERVER_ADDR=127.0.0.1:8080`, the default) | `./ttt --server local` |
+| Local server, WebSocket mode (`PORT=8081`) | `./ttt --server local-ws` |
+| Hosted server | `./ttt --server hosted` |
+| Anything else | `./ttt --server HOST:PORT`, or `ws://HOST:PORT/connect`, or `wss://HOST/connect` |
+
+Add `--name Ada` to choose your display name (the default is `$TTT_NAME`, then `$USER`).
+
+- **A server in Docker:** RAMServer-Core's `docker compose up --build` publishes it on port 8080, so
+  `./ttt --server local` reaches it.
+- **On WSL**, run it in Windows Terminal (the default for WSL). Its Unicode, colours, mouse and
+  clipboard support are all used. Use `--ascii` for a terminal without box-drawing characters.
+- **The hosted server** can take a few seconds to accept the first connection after a quiet period. The
+  connecting screen shows a timer meanwhile, and Esc cancels.
+- **Behind an HTTP proxy**, `wss://` connections go through `HTTPS_PROXY`/`https_proxy` (honouring
+  `NO_PROXY`), like most native tools. TLS uses the system CA bundle, or `TTT_CA_FILE`/`SSL_CERT_FILE`.
+
+## Playing two instances against each other
+
+Open two terminals (two Windows Terminal tabs on WSL), and start a server first if you're using a local
+one.
+
+**With a private session (works on any server, including the hosted one):**
+
+1. Terminal 1: `./ttt --server hosted --name Ada`, then press **C** (create a private game).
+   The session id appears at the top right. Press **Y** to copy it to the clipboard.
+2. Terminal 2: `./ttt --server hosted --name Bob`, then press **J** and paste the id, then Enter.
+3. Both press **R** (ready). The match starts. Ada, who joined first, is X and moves first.
+4. When it ends, both see the result and the scoreboard. Press **R** again for a rematch, **L** to
+   leave the session, or **Q** to quit.
+
+The same thing from the command line: `--create` in the first terminal, `--join <id>` in the second.
+
+**With quick match (a local server with no one else on it):** press **M** in both terminals, or start
+both with `--quick`. The first creates a public session and the second joins it.
+
+**A third person can watch:** anyone who joins after the two players is a spectator, whether they join by
+id or quick match puts them there. Joining is only possible before the match starts (the server refuses
+joins once it has started). Spectators see every move and result live.
+
+**No second person?** Run a bot as the opponent. It's an ordinary client, playing through the server:
+
+```bash
+./ttt --server local --quick --bot --casual --name Robot
+```
+
+`--bot` plays perfectly (you can't beat it, only draw), and `--casual` makes a random move a third of
+the time.
+
+## Controls
+
+| Where | Key | Does |
+| --- | --- | --- |
+| Server screen | ↑ ↓ | choose a server |
+| | typing, Backspace | edit your name |
+| | Enter | connect ("Other address..." asks for one) |
+| Lobby | M | quick match |
+| | C / P | create a private / public game |
+| | J | join by session id (paste works) |
+| | B, then 1-9 | browse public games, then join one |
+| Waiting room | R | ready / not ready (again after a match, for a rematch) |
+| | Y | copy the session id to the clipboard |
+| Your turn | ← ↑ → ↓, WASD or hjkl | move the cursor |
+| | Enter or Space | place your mark under the cursor |
+| | 1-9 | place directly: 1 is top-left, 9 bottom-right, in reading order. Empty cells show their number. |
+| | mouse click | place your mark in that cell |
+| | F, F | resign (press twice within 3 s) |
+| Anywhere in a session | L | leave the session (twice during a match, since it forfeits) |
+| Anywhere | Q or Ctrl-C | quit: leaves the session first, then closes the connection |
+| | ? | help |
+| Not connected | Enter / S / Q | reconnect / choose another server / quit |
+| Prompts | Enter / Esc | confirm / cancel |
+
+### Command-line options
+
+```
+-s, --server SPEC    local | local-ws | hosted | HOST:PORT | tcp://... | ws://... | wss://...
+-n, --name NAME      your display name (up to 32 characters)
+    --quick | --create | --create-public | --join ID     find a game straight after signing in
+    --plain          line-based interface (automatic when stdin/stdout isn't a terminal)
+    --ascii          no Unicode box drawing
+    --no-color       no colours (also when NO_COLOR is set)
+    --bell           ring the terminal bell when it becomes your turn
+    --no-guard       send every move to the server, even ones it will refuse (to see its errors)
+    --bot            ready up and play automatically
+    --casual         with --bot: make a random move a third of the time
+    --games N        with --bot: leave and quit after N matches
+    --delay MS       with --bot: wait MS milliseconds before each move (default 700)
+```
+
+### Plain mode
+
+`--plain` prints events and boards as lines, and reads commands from stdin: `quick`, `create`,
+`create public`, `join <id>`, `list`, `ready`, `unready`, `1`-`9` (or `move 5`), `resign`, `leave`,
+`who`, `board`, `reconnect`, `quit`, and `help`. End of input quits, except with `--bot`.
+
+### Debugging
+
+- `TTT_TRACE=/path/to/file` logs every frame sent and received, with sequence numbers, message types,
+  views and errors. The file is separate, so the screen isn't disturbed.
+- `TTT_LWS_LOG=1` prints libwebsockets' warnings to stderr. Redirect stderr when using the full-screen
+  UI.
+
+## Tests
+
+```bash
+make test                                  # unit tests: no server, network or display needed
+make integration SERVER=127.0.0.1:8080     # complete matches against a running server
+```
+
+- **Unit tests** (`tests/test_*.c`, cmocka, 56 tests):
+  - `test_frame`: framing, including byte-at-a-time reads, prefixes split at every offset, several frames
+    in one read, a frame plus part of the next, heartbeats among messages, a maximum-size (64 KiB) frame,
+    and rejecting oversized lengths before reading the payload.
+  - `test_proto`: building every request the client sends, decoded again and checked field by field.
+  - `test_view`: decoding views, against every example in the ruleset README plus malformed ones, and
+    building actions.
+  - `test_client`: session state driven by sequences of hand-built server messages:
+    - handshake and sign-in
+    - each way of joining, and join errors
+    - the roster and readiness
+    - moves with `expected_state_version`, and each kind of server error on a move
+    - stale and foreign updates
+    - wins, losses, draws, resignation and forfeit
+    - rematches and match history
+    - spectating
+    - leaving, heartbeats, garbage payloads
+    - disconnecting, then resuming or falling back to a fresh sign-in
+  - `test_addr`, `test_bot`: server addresses, and the bot (it is checked against every possible
+    opponent and never loses).
+- **Integration test** (`tests/integration.sh`): real `ttt` processes play complete matches against a
+  running RAMServer with tic-tac-toe, given as `SERVER` (any address `--server` accepts). Use a server
+  no one else is on, since the quick-match step expects its two clients to meet.
+  - Alice creates a private session, Bob joins it by id, and Cy joins as a spectator. They play three
+    matches with rematches, then leave cleanly.
+  - Two clients find each other by quick match and play a match.
+  - A move sent out of turn shows the server's `OUT_OF_TURN` error, and a resignation ends the match.
+- `make memcheck` runs the unit tests under valgrind; they're clean.
+
+## Design
+
+```
+            keyboard / mouse                         server
+                  │                                    │
+            ┌─────▼─────┐   commands   ┌──────────┐  frames  ┌─────────────┐
+            │  tui.c /  │─────────────▶│ client.c │◀────────▶│ transport.c │
+            │  plain.c  │◀── state ────│ (no I/O) │  app.c   │  TCP or WS  │
+            └───────────┘              └──────────┘  loop    └─────────────┘
+                                     proto.c  view.c  frame.c  bot.c
+```
+
+- **Separation.** `client.c` is the protocol and session state machine. It holds no sockets and draws
+  nothing. It takes received frame payloads and player commands, updates its state, and queues requests.
+  `frame.c` (framing), `proto.c` (building requests), `view.c` (the game encodings), `addr.c` and
+  `bot.c` are pure too. The unit tests link only these; networking (`transport.c`), the event loop
+  (`app.c`) and the interfaces (`tui.c`, `plain.c`) sit on top.
+- **One event loop that always reads.** `app.c` polls the connection and the keyboard together, every
+  100 ms at most. The connection is read whatever the player is doing, including typing a session id or
+  reading the help screen. Input is never read in a blocking way.
+- **Both transports look the same.** Plain TCP is a socket. For WebSocket, libwebsockets runs on its own
+  thread, writes the bytes of each binary message into a socketpair, and sends each queued frame as one
+  binary message. The main loop polls one descriptor and decodes one byte stream either way, as
+  `docs/websocket.md` describes. No `Origin` header and no subprotocol are sent, and quitting sends a
+  close frame (code 1000).
+- **The server is the source of truth.** The board, the roster, whose turn it is, readiness and results
+  are drawn only from the last `StateUpdate`/`MatchResult`. A move changes nothing on screen until the
+  server's update arrives. Every move carries `expected_state_version`, so a move made on an out-of-date
+  board is rejected (`STALE_STATE`) instead of applied. Updates older than the current `state_version`,
+  or for another session, are ignored.
+- **A local guard, and nothing more.** The client won't send a move it can see is pointless: not your
+  turn, a taken cell, a spectator, or one already waiting for an answer. It explains why in the event
+  log instead. That only saves a round trip: the server still decides. `--no-guard` turns it off to
+  show the server's own errors.
+- **Every error is shown.** Each `ErrorResponse` goes into the event log with its code name and the
+  server's message, matched to the request that caused it by `in_reply_to`. Some also change state:
+  - a failed join returns to the lobby
+  - a protocol-version or sign-in refusal is final
+  - `STALE_STATE` asks you to try again
+- **Requests and replies.** Sequences start at 1 and increase on every message. A table of pending
+  requests (sequence and kind) matches replies, so a join is only completed by its own reply.
+  Unsolicited messages (`in_reply_to` 0) are handled whenever they arrive.
+- **Heartbeats and keepalive.** Each server heartbeat gets exactly one heartbeat back. If the client has
+  sent nothing for 15 s, it sends one anyway, which keeps it inside the 30 s rule even if the server's
+  heartbeats stop.
+- **Quitting and losing the connection.** Quitting (Q, Ctrl-C, SIGTERM or SIGHUP) sends
+  `LeaveSessionRequest` and waits up to 2 s for the reply. Then it closes the connection and restores
+  the terminal. A second Ctrl-C quits at once.
+  - A dropped connection, a truncated or oversized frame, or a WebSocket close frame ends the connection
+    with a clear message. The client then offers to reconnect.
+  - Reconnecting first tries to resume with the stored `player_id` and `reconnect_token`. The server
+    doesn't support that yet (`docs/writing-a-client.md`), so on `AUTH_FAILED` the client signs in as a
+    new player.
+- **Matches.** After a `MatchResult`, the final board stays on screen, dimmed except for the winning
+  line, with the result, until the next match starts. On joining a session the client sends
+  `MatchHistoryRequest`, so the scoreboard includes matches played before you arrived.
+
+## Creative choices
+
+- **A terminal UI rather than a GUI window.** It runs the same in WSL, in the Docker container, over SSH
+  and in CI, with no display server and no new system packages. A GUI library would need a display for
+  anything beyond `make test`, and an extra dependency. Windows Terminal
+  makes a terminal UI feel like an app: colours, Unicode, mouse clicks and the clipboard all work. The
+  screen is drawn into a grid of cells, and only rows that changed are rewritten, so nothing flickers.
+- **Pieces you can read from across the room.** Each cell is 9×3 characters. X is drawn with diagonal
+  box strokes in cyan, O as a rounded box in yellow. Empty cells show their key number while you're
+  playing, so the 1-9 keys need no explanation.
+- **Several ways to play.** Arrow keys, WASD or vi keys with a highlighted cursor, number keys, or the
+  mouse. Mouse reporting is switched on only while you're playing, so you can still select text, such
+  as the session id, in the waiting room.
+- **Feedback.** The newest move gets a small marker. "YOUR MOVE" pulses, and the winning line flashes.
+  Results appear as a banner: "★ YOU WIN ★", "YOU LOSE", "DRAW", or "<name> WINS" for spectators.
+  `--bell` rings when it becomes your turn.
+- **Sharing a private game is one key.** **Y** copies the session id to the system clipboard (with the
+  OSC 52 escape sequence, supported by Windows Terminal and most modern terminals), ready to paste to a
+  friend.
+- **A running scoreboard** of wins and draws per player, kept across rematches and filled in from the
+  server's match history when you join.
+- **An event log** that narrates the session in plain words: joins, leaves, readiness, disconnects,
+  moves refused and why, and results.
+- **No accidental forfeits.** Resigning, and leaving or quitting during a match, need a second press
+  within 3 seconds.
+- **A bot that is just another client.** `--bot` is useful for practice, demos and automated tests, and
+  it exercises the protocol exactly like a person does.
+
+## Decisions and limitations
+
+- **Display names** are limited to 32 characters by the client, because the server's limit isn't
+  documented. The server's own `INVALID_ARGUMENT` would still be shown.
+- **Mark assignment** comes from the view (the recipient's own mark) and the `x_player`/`o_player`
+  annotations, as the ruleset README describes. `player_order` isn't used.
+- **`LegalActionsRequest` isn't used.** The view says everything the client needs to offer moves.
+- **Only the first winner** in `winner_player_ids` is shown. Tic-tac-toe has at most one.
+- **Character widths.** Wide (East Asian) characters in other players' names may misalign a row, because
+  the renderer counts one column per character.
+- **Sessions in `SESSION_STATUS_READY` or `STARTING`** are drawn like the waiting room. The documents
+  say nothing more about them.
+
+## Questions and gaps in the documentation
+
+These were noted while the client was written against an earlier copy of the documentation. RAMServer-Core's
+documentation has since been corrected for 2, 3, 5 and 7: a session returns to waiting after a match, the
+update after the game-ending move carries the final view and annotations, out-of-turn actions such as
+resigning are listed for the waiting player, and the formatting issues are fixed.
+
+1. **Testing against a real server.** The client was first tested only against a stand-in server written
+   from the documentation, because no server had tic-tac-toe yet. The integration test now runs against the
+   real server instead.
+2. **Session status after a match.** `docs/protocol.md` says that after `MatchResult` "the session moves
+   to `SESSION_STATUS_CLOSED`". `docs/writing-a-client.md` and `docs/writing-a-ruleset.md` say it
+   returns to waiting for a rematch. The client follows the latter, but also handles `CLOSED` (it says
+   the session closed and offers to leave).
+3. **The update after a game-ending move.** It isn't stated whether that `StateUpdate` still has status
+   `IN_PROGRESS` (with the final view and annotations). The client keeps any valid view as the final
+   board, whatever the status says.
+4. **The display name's length limit** is "the server's length limit", which is unspecified.
+5. **`LegalActionsResponse` for the waiting player.** `docs/protocol.md` says it is empty while it isn't
+   your turn, but the ruleset allows resigning out of turn and lists `resign` (see the ruleset README).
+   The client doesn't depend on either.
+6. **Proxies.** `docs/websocket.md` doesn't mention HTTP proxies. The client uses `HTTPS_PROXY` for
+   `wss://`, which is how it was tested against the hosted server from a network that requires a proxy.
+7. **Smaller issues.**
+   - The `ErrorCode` table in `docs/protocol.md` has two rows joined on one line.
+   - `MatchHistoryResponse` is described as sent "In reply to `MatchHistoryResponse`" instead of
+     `MatchHistoryRequest`.
+   - `docs/writing-a-client.md` links to `protocol.md#envelopes-and-framing` as "Request/reply
+     pairing".
