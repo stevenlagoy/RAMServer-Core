@@ -14,6 +14,7 @@ import (
 	"github.com/stevenlagoy/ramserver-core/server/game"
 	"github.com/stevenlagoy/ramserver-core/server/internal/server"
 	"github.com/stevenlagoy/ramserver-core/server/rulesets/chess"
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/tictactoe"
 )
 
 const defaultAddr = "127.0.0.1:8080"
@@ -29,6 +30,9 @@ func main() {
 	games := game.NewRegistry()
 	games.Register("chess", func() game.Game {
 		return &chess.Game{}
+	})
+	games.Register("tictactoe", func() game.Game {
+		return &tictactoe.Game{}
 	})
 
 	// Cloud Run supplies PORT. Use HTTP/WebSocket mode
