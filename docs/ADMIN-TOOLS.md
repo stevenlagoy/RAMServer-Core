@@ -47,7 +47,7 @@ cd server
 go run ./cmd/ramadmin token YOUR_NAME
 ```
 
-Replace `YOUR_NAME` with your administrator name. Names must be unique and use only lowercase letters, digits, `.`, `_`, or `-`. The name can be as short as one character and no longer than 32 characters.
+Replace `YOUR_NAME` with your administrator name. Names must be unique and use only lowercase letters, digits, `.`, `_`, or `-`. The name can be as short as one character and no longer than 32 characters. It is suggested that your administrator name match your GitHub username.
 
 For example:
 
@@ -71,7 +71,7 @@ This line contains your administrator name and the hash of your personal token. 
 
 ### 2. Send the line to the administrator owner
 
-Send the complete hash line to the person who maintains RAMServer administration. Send it through a trusted channel approved by your team.
+Send the complete hash line to the person who maintains RAMServer administration. Send it through an approved and trusted team channel.
 
 ```text
 alice 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
