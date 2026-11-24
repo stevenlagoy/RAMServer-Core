@@ -75,6 +75,28 @@ func TestRequestsCarryTheBearerTokenAndBody(t *testing.T) {
 	}
 }
 
+func TestConnectionsAndLogsCommands(t *testing.T) {
+	srv, seen := fakeAPI(t, map[string]string{
+		"GET /v1/connections": `[]`,
+		"GET /v1/logs":        `{"lines":["line one"]}`,
+	})
+	e := env(map[string]string{"RAMSERVER_ADMIN_TOKEN": "ramadm_test", "RAMSERVER_ADMIN_URL": srv.URL})
+
+	var out, errOut bytes.Buffer
+	if code := run([]string{"connections"}, &out, &errOut, e); code != 0 {
+		t.Fatalf("connections: code %d, err %q", code, errOut.String())
+	}
+	out.Reset()
+	if code := run([]string{"logs", "-n", "1", "-grep", "line"}, &out, &errOut, e); code != 0 {
+		t.Fatalf("logs: code %d, err %q", code, errOut.String())
+	}
+	if got := *seen; len(got) != 2 ||
+		got[0].path != "/v1/connections" ||
+		got[1].path != "/v1/logs?contains=line&n=1" {
+		t.Fatalf("unexpected requests: %+v", got)
+	}
+}
+
 func TestServerErrorsAreReported(t *testing.T) {
 	srv, _ := fakeAPI(t, nil)
 	e := env(map[string]string{"RAMSERVER_ADMIN_TOKEN": "ramadm_test", "RAMSERVER_ADMIN_URL": srv.URL})

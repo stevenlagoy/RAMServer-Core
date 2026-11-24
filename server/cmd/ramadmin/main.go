@@ -133,9 +133,11 @@ func (c *cli) connect(baseURL, tokenFile string, getenv func(string) string) err
 	token := strings.TrimSpace(getenv("RAMSERVER_ADMIN_TOKEN"))
 	if token == "" {
 		if tokenFile == "" {
-			if _, err := defaultTokenFile(); err != nil {
+			resolved, err := defaultTokenFile()
+			if err != nil {
 				return err
 			}
+			tokenFile = resolved
 		}
 		b, err := os.ReadFile(tokenFile)
 		if err != nil {
@@ -214,6 +216,11 @@ func (c *cli) dispatch(args []string) error {
 		return c.simple("POST", "/v1/sessions/"+url.PathEscape(rest[0])+"/close", body, func(map[string]any) string {
 			return "closed session " + clean(rest[0], 80)
 		})
+	case "connections":
+		if len(rest) != 0 {
+			return usageError("usage: ramadmin connections")
+		}
+		return c.connections()
 	case "close-conn":
 		if len(rest) != 1 {
 			return usageError("usage: ramadmin close-conn <id>")
@@ -233,7 +240,9 @@ func (c *cli) dispatch(args []string) error {
 // Send one request and return the body
 func (c *cli) call(method, path string, body []byte) ([]byte, error) {
 	u := *c.base
-	u.Path = strings.TrimRight(c.base.Path, "/") + path
+	requestPath, rawQuery, _ := strings.Cut(path, "?")
+	u.Path = strings.TrimRight(c.base.Path, "/") + requestPath
+	u.RawQuery = rawQuery
 	req, err := http.NewRequest(method, u.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
