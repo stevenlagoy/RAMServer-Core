@@ -2,10 +2,14 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"log"
 	"log/slog"
 	"runtime/debug"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -64,6 +68,19 @@ type Session struct {
 
 	created    time.Time
 	lastActive time.Time
+	joinToken  atomic.Pointer[string]
+}
+
+func (s *Session) setJoinToken(token string) {
+	s.joinToken.Store(&token)
+}
+
+func (s *Session) joinTokenValue() string {
+	token := s.joinToken.Load()
+	if token == nil {
+		return ""
+	}
+	return *token
 }
 
 // Creates an empty Session; its creator joins through Join like any other member
@@ -93,15 +110,16 @@ func (s *Session) Owner() string {
 
 // Envelopes request Run processes
 type sessionMsg struct {
-	join       *joinMsg
-	leave      *leaveMsg
-	setReady   *setReadyMsg
-	submit     *submitMsg
-	legalMoves *legalMovesMsg
-	publicInfo *publicInfoMsg
-	info       *infoMsg
-	history    *historyMsg
-	closeReq   *closeMsg
+	join              *joinMsg
+	leave             *leaveMsg
+	setReady          *setReadyMsg
+	submit            *submitMsg
+	legalMoves        *legalMovesMsg
+	publicInfo        *publicInfoMsg
+	info              *infoMsg
+	history           *historyMsg
+	closeReq          *closeMsg
+	generateJoinToken *generateJoinTokenMsg
 }
 
 type submitMsg struct {
@@ -119,6 +137,11 @@ type joinMsg struct {
 }
 type publicInfoMsg struct {
 	reply chan transport.SessionInfo
+}
+type generateJoinTokenMsg struct {
+	clientID string
+	seq      uint64
+	reply    chan error
 }
 type historyMsg struct {
 	reply chan []transport.MatchResult
@@ -214,6 +237,8 @@ func (m sessionMsg) closeReply() {
 		close(m.info.reply)
 	case m.history != nil:
 		close(m.history.reply)
+	case m.generateJoinToken != nil:
+		close(m.generateJoinToken.reply)
 	}
 }
 
@@ -288,6 +313,63 @@ func (s *Session) History(ctx context.Context) []transport.MatchResult {
 	return matches
 }
 
+func (s *Session) GenerateJoinToken(ctx context.Context, clientID string, seq uint64) error {
+	reply := make(chan error, 1)
+	if !s.send(ctx, sessionMsg{generateJoinToken: &generateJoinTokenMsg{
+		clientID: clientID,
+		seq:      seq,
+		reply:    reply,
+	}}) {
+		return s.noReplyErr(ctx)
+	}
+	err, ok := await(ctx, s, reply)
+	if !ok {
+		return s.noReplyErr(ctx)
+	}
+	return err
+}
+
+func (s *Session) handleGenerateJoinToken(req *generateJoinTokenMsg) {
+	if _, ok := s.members[req.clientID]; !ok {
+		req.reply <- ErrNotInSession
+		return
+	}
+	if s.Owner() != req.clientID {
+		req.reply <- transport.NewError(transport.CodeIllegalAction, "only the session owner may generate a join token")
+		return
+	}
+	token, err := generateJoinToken(s.ID)
+	if err != nil {
+		req.reply <- err
+		return
+	}
+	s.setJoinToken(token)
+	s.stateVersion++
+	s.broadcastState(req.clientID, req.seq)
+	req.reply <- nil
+}
+
+func generateJoinToken(sessionID string) (string, error) {
+	cryptoBuf := make([]byte, 8)
+	if _, err := rand.Read(cryptoBuf); err != nil {
+		return "", err
+	}
+	timeBuf := make([]byte, 8)
+	binary.BigEndian.PutUint64(timeBuf, uint64(time.Now().UnixNano()))
+	hasher := sha256.New()
+	hasher.Write([]byte(sessionID))
+	hasher.Write(timeBuf)
+	hasher.Write(cryptoBuf)
+	hashBytes := hasher.Sum(nil)
+	runes := []rune{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'M', 'N', 'P', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', '3', '4', '5', '6', '7', '8', '9'}
+	var result strings.Builder
+	for i := 0; i < 6; i++ {
+		chunk := binary.BigEndian.Uint32(hashBytes[i*4 : (i+1)*4])
+		result.WriteRune(runes[uint64(chunk)%uint64(len(runes))])
+	}
+	return result.String(), nil
+}
+
 // Session's actor loop. Owns exclusively every mutable field on Session. Returns when ctx is
 // cancelled or the last member leaves; either way, later calls into the Session stop waiting
 func (s *Session) Run(ctx context.Context) {
@@ -334,6 +416,8 @@ func (s *Session) handle(msg sessionMsg) {
 		s.handleHistory(msg.history)
 	case msg.closeReq != nil:
 		s.handleClose(msg.closeReq)
+	case msg.generateJoinToken != nil:
+		s.handleGenerateJoinToken(msg.generateJoinToken)
 	}
 }
 
@@ -550,6 +634,7 @@ func (s *Session) handlePublicInfo(i *publicInfoMsg) {
 	}
 	i.reply <- transport.SessionInfo{
 		SessionID:     s.ID,
+		JoinToken:     s.joinTokenValue(),
 		GameID:        s.GameName,
 		Status:        status,
 		Players:       s.players(),
@@ -593,6 +678,7 @@ func (s *Session) viewFor(memberID string) transport.StateUpdate {
 		Players:       s.players(),
 		OwnerPlayerID: s.Owner(),
 		StateVersion:  s.stateVersion,
+		JoinToken:     s.joinTokenValue(),
 	}
 	if s.current != nil {
 		view.Status = transport.StatusInProgress

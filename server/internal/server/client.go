@@ -243,6 +243,13 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 			return
 		}
 		c.Send(transport.EncodeMatchHistoryResponse(msg.Sequence, msg.SessionID, c.session.History(ctx)))
+	case transport.KindGenerateJoinToken:
+		if !c.inSession(msg) {
+			return
+		}
+		if err := c.session.GenerateJoinToken(ctx, c.ID, msg.Sequence); err != nil {
+			c.Send(transport.EncodeError(msg.Sequence, err))
+		}
 	case transport.KindAction:
 		if !c.inSession(msg) {
 			slog.Warn("action rejected",
