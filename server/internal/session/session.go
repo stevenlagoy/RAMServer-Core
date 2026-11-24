@@ -6,8 +6,11 @@ import (
 	"log"
 	"log/slog"
 	"runtime/debug"
+	"sync/atomic"
+	"time"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
+	"github.com/stevenlagoy/ramserver-core/server/internal/admin"
 	"github.com/stevenlagoy/ramserver-core/server/internal/match"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
@@ -24,6 +27,8 @@ type Member struct {
 	Sender      Sender
 	Role        game.Role
 	Ready       bool
+	Accepted    int64 // actions the game applied for this member
+	Rejected    int64 // actions refused for this member
 }
 
 // One completed round for Session history and leaderboards
@@ -40,6 +45,10 @@ type Session struct {
 	Game     game.Game
 	Public   bool
 
+	// Optional counters
+	Metrics *admin.Metrics
+	closed  atomic.Bool // set by Close
+
 	inbox   chan sessionMsg
 	stopped chan struct{} // closed when Run returns, so callers stop waiting on a Session that will never answer
 	onEmpty func()        // set by SessionStore before Run starts; called when the last member leaves
@@ -52,11 +61,14 @@ type Session struct {
 	current      *match.Match
 	stateVersion uint64
 	emptied      bool // the last member left, so Run returns instead of handling more messages
+
+	created    time.Time
+	lastActive time.Time
 }
 
 // Creates an empty Session; its creator joins through Join like any other member
 func NewSession(id, gameName string, g game.Game, public bool) *Session {
-	return &Session{
+	s := &Session{
 		ID:           id,
 		GameName:     gameName,
 		Game:         g,
@@ -66,6 +78,9 @@ func NewSession(id, gameName string, g game.Game, public bool) *Session {
 		members:      make(map[string]*Member),
 		stateVersion: 1,
 	}
+	s.created = time.Now()
+	s.lastActive = s.created
+	return s
 }
 
 // Returns current lobby owner
@@ -83,8 +98,10 @@ type sessionMsg struct {
 	setReady   *setReadyMsg
 	submit     *submitMsg
 	legalMoves *legalMovesMsg
+	publicInfo *publicInfoMsg
 	info       *infoMsg
 	history    *historyMsg
+	closeReq   *closeMsg
 }
 
 type submitMsg struct {
@@ -100,7 +117,7 @@ type joinMsg struct {
 	sender      Sender
 	reply       chan error
 }
-type infoMsg struct {
+type publicInfoMsg struct {
 	reply chan transport.SessionInfo
 }
 type historyMsg struct {
@@ -191,6 +208,8 @@ func (m sessionMsg) closeReply() {
 		close(m.join.reply)
 	case m.legalMoves != nil:
 		close(m.legalMoves.reply)
+	case m.publicInfo != nil:
+		close(m.publicInfo.reply)
 	case m.info != nil:
 		close(m.info.reply)
 	case m.history != nil:
@@ -251,9 +270,9 @@ func (s *Session) LegalMoves(ctx context.Context, clientID string) []game.Action
 }
 
 // Returns a snapshot of the session for listings. ok is false if ctx was cancelled or the Session has stopped
-func (s *Session) Info(ctx context.Context) (info transport.SessionInfo, ok bool) {
+func (s *Session) PublicInfo(ctx context.Context) (info transport.SessionInfo, ok bool) {
 	reply := make(chan transport.SessionInfo, 1)
-	if !s.send(ctx, sessionMsg{info: &infoMsg{reply: reply}}) {
+	if !s.send(ctx, sessionMsg{publicInfo: &publicInfoMsg{reply: reply}}) {
 		return transport.SessionInfo{}, false
 	}
 	return await(ctx, s, reply)
@@ -293,6 +312,9 @@ func (s *Session) handle(msg sessionMsg) {
 			msg.closeReply()
 		}
 	}()
+	if msg.publicInfo == nil && msg.info == nil { // session inspection is not player activity
+		s.lastActive = time.Now()
+	}
 	switch {
 	case msg.join != nil:
 		s.handleJoin(msg.join)
@@ -304,21 +326,32 @@ func (s *Session) handle(msg sessionMsg) {
 		s.handleSubmit(msg.submit)
 	case msg.legalMoves != nil:
 		s.handleLegalMoves(msg.legalMoves)
+	case msg.publicInfo != nil:
+		s.handlePublicInfo(msg.publicInfo)
 	case msg.info != nil:
 		s.handleInfo(msg.info)
 	case msg.history != nil:
 		s.handleHistory(msg.history)
+	case msg.closeReq != nil:
+		s.handleClose(msg.closeReq)
 	}
 }
 
 func (s *Session) handleJoin(j *joinMsg) {
+	if s.closed.Load() {
+		s.Metrics.Inc(admin.JoinsRejected)
+		j.reply <- ErrClosed
+		return
+	}
 	if s.current != nil {
 		// TODO: game-defined late-join policy (ie allow only spectators)
+		s.Metrics.Inc(admin.JoinsRejected)
 		j.reply <- ErrAlreadyStarted
 		return
 	}
 	role := s.assignRole()
 	if role == "" {
+		s.Metrics.Inc(admin.JoinsRejected)
 		j.reply <- ErrLobbyFull
 		return
 	}
@@ -326,6 +359,7 @@ func (s *Session) handleJoin(j *joinMsg) {
 		s.order = append(s.order, j.clientID) // only after the join is accepted, so a rejected joiner never gets a turn
 	}
 	s.members[j.clientID] = &Member{ClientID: j.clientID, DisplayName: j.displayName, Sender: j.sender, Role: role}
+	s.Metrics.Inc(admin.JoinsSucceeded)
 	s.stateVersion++
 	j.reply <- nil
 	s.broadcastState(j.clientID, j.seq)
@@ -418,6 +452,7 @@ func (s *Session) startMatch(requesterID string, seq uint64) {
 		roles[id] = m.Role
 	}
 	s.current = match.NewMatch(s.Game, append([]string(nil), s.order...), roles) // copy order
+	s.Metrics.Inc(admin.MatchesStarted)
 	s.broadcastState(requesterID, seq)
 }
 
@@ -429,7 +464,8 @@ func (s *Session) handleSubmit(req *submitMsg) {
 		return
 	}
 
-	if _, ok := s.members[action.ActorID]; !ok {
+	member, ok := s.members[action.ActorID]
+	if !ok {
 		s.rejectAction(req, transport.CodeNotInSession, ErrNotInSession)
 		return
 	}
@@ -451,18 +487,25 @@ func (s *Session) handleSubmit(req *submitMsg) {
 
 	if err := s.current.ApplyAction(action); err != nil {
 		code := transport.CodeIllegalAction
+		counter := admin.ActionsRejectedIllegal
 
 		switch {
 		case errors.Is(err, match.ErrNotYourTurn):
 			code = transport.CodeOutOfTurn
+			counter = admin.ActionsRejectedOutOfTurn
 		case errors.Is(err, game.ErrMalformedAction):
 			code = transport.CodeMalformedMessage
+			counter = admin.ActionsRejectedMalformed
 		}
+		member.Rejected++
+		s.Metrics.Inc(counter)
 
 		s.rejectAction(req, code, err)
 		return
 	}
 
+	member.Accepted++
+	s.Metrics.Inc(admin.ActionsAccepted)
 	s.stateVersion++
 
 	slog.Info("action accepted",
@@ -484,6 +527,7 @@ func (s *Session) endMatch(result game.MatchResult) {
 	s.history = append(s.history, MatchResult{Turns: s.current.Turns, Result: result})
 	s.broadcastMatchEnded(result, s.current.Turns)
 	s.current = nil
+	s.Metrics.Inc(admin.MatchesCompleted)
 	for _, m := range s.members {
 		m.Ready = false // require re-ready before next round
 	}
@@ -499,7 +543,7 @@ func (s *Session) handleLegalMoves(l *legalMovesMsg) {
 	l.reply <- s.current.LegalActions(l.clientID)
 }
 
-func (s *Session) handleInfo(i *infoMsg) {
+func (s *Session) handlePublicInfo(i *publicInfoMsg) {
 	status := transport.StatusWaiting
 	if s.current != nil {
 		status = transport.StatusInProgress

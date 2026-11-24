@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
+	"github.com/stevenlagoy/ramserver-core/server/internal/admin"
 )
 
 // Owns the lifetime of every active Session.
@@ -13,6 +14,7 @@ type SessionStore struct {
 	ctx      context.Context // the server's lifetime
 	mu       sync.Mutex
 	sessions map[string]storedSession
+	Metrics  *admin.Metrics
 }
 
 type storedSession struct {
@@ -34,6 +36,8 @@ func (st *SessionStore) Create(id, gameName string, g game.Game, public bool) (*
 	}
 	ctx, cancel := context.WithCancel(st.ctx)
 	s := NewSession(id, gameName, g, public)
+	s.Metrics = st.Metrics
+	st.Metrics.Inc(admin.SessionsCreated)
 	s.onEmpty = func() { st.Remove(id) }
 	st.sessions[id] = storedSession{session: s, cancel: cancel}
 	go s.Run(ctx)

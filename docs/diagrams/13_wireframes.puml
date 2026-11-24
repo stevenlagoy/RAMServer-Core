@@ -6,7 +6,7 @@ title Client Wireframes (Screens 1-6)
   --
   <b>Chess
   --
-  Server address | "127.0.0.1:9000        "
+  Server address | "127.0.0.1:8080        "
   Display name   | "Player                "
   .
   [ Connect ]

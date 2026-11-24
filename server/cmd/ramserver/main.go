@@ -34,10 +34,17 @@ func main() {
 	// Cloud Run supplies PORT. Use HTTP/WebSocket mode
 	if port := os.Getenv("PORT"); port != "" {
 		addr := ":" + port
+		hub := server.NewHub()
+		cfg := server.DefaultConfig()
+		cfg.Hub = hub
+		adminHandler, err := startCloudAdmin(hub)
+		if err != nil {
+			log.Fatal("Error starting the Cloud Run admin API:", err)
+		}
 
 		httpServer := &http.Server{
 			Addr:              addr,
-			Handler:           server.NewWebSocketHandler(ctx, server.DefaultConfig(), games),
+			Handler:           server.NewWebSocketHandler(ctx, cfg, games, adminHandler),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 
@@ -77,7 +84,13 @@ func main() {
 	}
 	defer listener.Close()
 
-	if err := server.Serve(ctx, listener, server.DefaultConfig(), games); err != nil {
+	hub := server.NewHub()
+	if err := startAdmin(ctx, hub); err != nil {
+		log.Fatal("Error starting the admin API:", err)
+	}
+	cfg := server.DefaultConfig()
+	cfg.Hub = hub
+	if err := server.Serve(ctx, listener, cfg, games); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -3,11 +3,15 @@ package server
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -17,8 +21,57 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
+	"github.com/stevenlagoy/ramserver-core/server/internal/admin"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
+
+func TestWebSocketHandlerMountsAdminAPI(t *testing.T) {
+	token := "ramadm_test"
+	tokenFile := filepath.Join(t.TempDir(), "admin-tokens")
+	if err := os.WriteFile(tokenFile, []byte("alice "+admin.HashToken(token)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := admin.NewTokenStore(tokenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	hub := NewHub()
+	cfg := DefaultConfig()
+	cfg.Hub = hub
+	adminHandler := admin.NewHandler(admin.Options{
+		Tokens:  tokens,
+		Control: hub,
+		Logs:    admin.NewLogRing(10),
+		Metrics: hub.Metrics,
+	})
+	handler := NewWebSocketHandler(ctx, cfg, game.NewRegistry(), adminHandler)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/whoami", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("whoami status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["admin"] != "alice" {
+		t.Fatalf("whoami admin = %q, want alice", body["admin"])
+	}
+}
 
 func testConfig() ServerConfig {
 	return ServerConfig{
