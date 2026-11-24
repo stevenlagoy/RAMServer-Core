@@ -60,8 +60,8 @@ package "Persistence (planned)" {
 
 interface "Sender\nSend([]byte)" as ISender
 
-Clients --> Serve : TCP :9000
-Lean --> Serve : TCP :9000
+Clients --> Serve : TCP :8080
+Lean --> Serve : TCP :8080
 Serve --> ClientC : one Client per connection
 ClientC --> Framing
 ClientC --> Codec

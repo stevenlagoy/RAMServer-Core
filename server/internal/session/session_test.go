@@ -557,7 +557,7 @@ func TestInfoDescribesTheSession(t *testing.T) {
 	}
 	a.next(t)
 
-	info, ok := s.Info(ctx)
+	info, ok := s.PublicInfo(ctx)
 	if !ok || info.SessionID != "s1" || info.GameID != "test" || info.Status != transport.StatusWaiting ||
 		!info.Joinable || info.OwnerPlayerID != "a" || len(info.Players) != 1 || info.Players[0].Role != "player" {
 		t.Fatalf("unexpected info for a waiting session: %+v (ok=%v)", info, ok)
@@ -565,7 +565,7 @@ func TestInfoDescribesTheSession(t *testing.T) {
 
 	s.SetReady(ctx, "a", true, 2) // the stub starts with one ready player
 	a.next(t)
-	if info, _ := s.Info(ctx); info.Status != transport.StatusInProgress || info.Joinable {
+	if info, _ := s.PublicInfo(ctx); info.Status != transport.StatusInProgress || info.Joinable {
 		t.Fatalf("a running match must be in progress and not joinable, got %+v", info)
 	}
 }
@@ -576,7 +576,7 @@ func TestFullSessionIsNotJoinableInInfo(t *testing.T) {
 	if err := s.Join(ctx, "a", "", 1, a); err != nil {
 		t.Fatal(err)
 	}
-	if info, _ := s.Info(ctx); info.Joinable {
+	if info, _ := s.PublicInfo(ctx); info.Joinable {
 		t.Fatalf("a session with no free seat is joinable: %+v", info)
 	}
 }

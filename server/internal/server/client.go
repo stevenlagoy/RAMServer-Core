@@ -16,10 +16,12 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
+	"github.com/stevenlagoy/ramserver-core/server/internal/admin"
 	"github.com/stevenlagoy/ramserver-core/server/internal/session"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
@@ -36,6 +38,15 @@ type Client struct {
 	connected     bool             // true after a successful ConnectRequest
 	authenticated bool             // true after a successful AuthRequest; readLoop rejects session messages while false
 	session       *session.Session // nil until a JoinSessionRequest succeeds
+
+	// Administration
+	connID      string
+	connSeq     uint64
+	connectedAt time.Time
+	msgsIn      atomic.Int64
+	kicked      atomic.Bool // set when an administrator closes the connection
+	meta        atomic.Pointer[clientMeta]
+	metrics     *admin.Metrics
 }
 
 // Create a new client from the given connection, match, and server configuration
@@ -75,6 +86,7 @@ func recoverPanic(where string) {
 // Activates this client and begins the read and write loops
 func (c *Client) Run(ctx context.Context) {
 	defer recoverPanic(("client " + c.connection.RemoteAddr().String())) // Runs last
+	defer c.leaveSessionOnExit(ctx)                                      // Runs second-to-last. After admin kick, frees the seat
 
 	connCtx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -125,12 +137,15 @@ func (c *Client) readLoop(ctx context.Context) {
 			continue // Heartbeat
 		}
 		receivedFirst = true
+		c.msgsIn.Add(1)
 
 		msg, err := transport.DecodeClientMessage(frame)
 		if err != nil {
+			c.metrics.Inc(admin.MessagesMalformed)
 			c.Send(transport.EncodeError(msg.Sequence, err)) // Sequence is 0 if the envelope did not parse
 			continue
 		}
+		c.metrics.Inc(admin.MessagesReceived)
 		if !c.authenticated {
 			if msg.Kind == transport.KindAction {
 				slog.Warn("action rejected",
@@ -173,6 +188,8 @@ func (c *Client) handshake(msg transport.ClientMessage) {
 		c.ID = newRandomID()
 		c.DisplayName = msg.DisplayName
 		c.authenticated = true
+		c.meta.Store(&clientMeta{playerID: c.ID, displayName: c.DisplayName})
+		c.metrics.Inc(admin.AuthSucceeded)
 		// TODO: persist (c.ID, reconnectToken) so a later AuthRequest can resume this identity
 		reconnectToken := newRandomID()
 		c.Send(transport.EncodeAuthResponse(msg.Sequence, c.ID, reconnectToken, ""))
@@ -226,6 +243,13 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 			return
 		}
 		c.Send(transport.EncodeMatchHistoryResponse(msg.Sequence, msg.SessionID, c.session.History(ctx)))
+	case transport.KindGenerateJoinToken:
+		if !c.inSession(msg) {
+			return
+		}
+		if err := c.session.GenerateJoinToken(ctx, c.ID, msg.Sequence); err != nil {
+			c.Send(transport.EncodeError(msg.Sequence, err))
+		}
 	case transport.KindAction:
 		if !c.inSession(msg) {
 			slog.Warn("action rejected",
@@ -266,6 +290,9 @@ func (c *Client) dispatch(ctx context.Context, msg transport.ClientMessage) {
 
 // Reports whether msg names the client's current session, replying ERROR_CODE_NOT_IN_SESSION if it does not
 func (c *Client) inSession(msg transport.ClientMessage) bool {
+	if c.session != nil && c.session.IsClosed() { // an administrator closed it
+		c.session = nil
+	}
 	if c.session == nil || c.session.ID != msg.SessionID {
 		c.Send(transport.EncodeError(msg.Sequence, errNotInSession))
 		return false
@@ -274,6 +301,9 @@ func (c *Client) inSession(msg transport.ClientMessage) bool {
 }
 
 func (c *Client) handleJoinSession(ctx context.Context, msg transport.ClientMessage) {
+	if c.session != nil && c.session.IsClosed() { // an administrator closed it
+		c.session = nil
+	}
 	if c.session != nil {
 		c.Send(transport.EncodeError(msg.Sequence, transport.NewError(transport.CodeAlreadyInSession, "already in session %q", c.session.ID)))
 		return
@@ -347,7 +377,7 @@ func (c *Client) createAndJoin(ctx context.Context, msg transport.ClientMessage)
 func (c *Client) handleListSessions(ctx context.Context, msg transport.ClientMessage) {
 	infos := []transport.SessionInfo{}
 	for _, s := range c.sessions.List(msg.GameID, true) {
-		info, ok := s.Info(ctx)
+		info, ok := s.PublicInfo(ctx)
 		if !ok {
 			return // ctx was cancelled
 		}

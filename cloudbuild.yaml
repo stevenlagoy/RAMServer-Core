@@ -42,6 +42,10 @@ steps:
       - update
       - $_SERVICE_NAME
       - --platform=managed
+      - --min-instances=1
+      - --max-instances=1
+      - --set-env-vars=RAMSERVER_ADMIN_TOKENS_FILE=/run/secrets/ramserver-admin-tokens
+      - --set-secrets=/run/secrets/ramserver-admin-tokens=$_ADMIN_TOKENS_SECRET:latest
       - >-
         --image=$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA
       - >-
@@ -59,6 +63,7 @@ options:
 
 substitutions:
   _PLATFORM: managed
+  _ADMIN_TOKENS_SECRET: ramserver-admin-tokens
   _SERVICE_NAME: ramserver-core
   _TRIGGER_ID: 29ab3c69-07bb-47b6-8353-4e31556836ff
   REPO_NAME: ramserver-core

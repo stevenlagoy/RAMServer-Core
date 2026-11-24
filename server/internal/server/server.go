@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
+	"github.com/stevenlagoy/ramserver-core/server/internal/admin"
 	"github.com/stevenlagoy/ramserver-core/server/internal/session"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
@@ -29,6 +30,7 @@ type ServerConfig struct {
 	PingInterval        time.Duration // Interval between keep-alive pings sent to a connection
 	OutQueueSize        int           // Number of messages which can be in flight to a client at once: exceeding this will cause the client to be dropped
 	MaxConnectionsOneIP int32         // Maximum connections allowed from the same IP address
+	Hub                 *Hub          // Optional control service for administration
 }
 
 // Get the default configuration for a medium-size server
@@ -85,6 +87,11 @@ func Serve(ctx context.Context, listener net.Listener, config ServerConfig, game
 	var wg sync.WaitGroup
 
 	sessions := session.NewSessionStore(ctx)
+	hub := config.Hub
+	if hub == nil {
+		hub = NewHub()
+	}
+	hub.attach(sessions)
 
 	go func() {
 		<-ctx.Done()
@@ -125,6 +132,7 @@ func Serve(ctx context.Context, listener net.Listener, config ServerConfig, game
 
 		release, ok := ipCounts.allow(conn.RemoteAddr(), config.MaxConnectionsOneIP)
 		if !ok {
+			hub.Metrics.Inc(admin.ConnectionsRejectedPerIP)
 			conn.Close()
 			continue
 		}
@@ -133,6 +141,7 @@ func Serve(ctx context.Context, listener net.Listener, config ServerConfig, game
 		select {
 		case sem <- struct{}{}:
 		default:
+			hub.Metrics.Inc(admin.ConnectionsRejectedFull)
 			conn.SetWriteDeadline(time.Now().Add(time.Second))
 			transport.WriteFrame(conn, transport.EncodeError(0, errors.New("server full")))
 			conn.Close()
@@ -146,7 +155,9 @@ func Serve(ctx context.Context, listener net.Listener, config ServerConfig, game
 			defer wg.Done()
 			defer func() { <-sem }() // Release slot when done
 			defer release()
-			NewClient(conn, config, games, sessions).Run(ctx)
+			client := NewClient(conn, config, games, sessions)
+			defer hub.add(client)()
+			client.Run(ctx)
 		}(ctx, conn)
 	}
 }

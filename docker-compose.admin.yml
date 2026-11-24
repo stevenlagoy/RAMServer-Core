@@ -1,0 +1,18 @@
+# Production overlay which turns on the admin API. Use it with the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.admin.yml up -d --build
+#
+# The API is published on the host's loopback address only. Do not change 127.0.0.1 here: reach the
+# API through an SSH tunnel (see docs/ADMIN-TOOLS.md). The token file holds hashes, lives outside the
+# repository, and must be readable by the container's user (see the setup steps in the docs).
+services:
+  server:
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      RAMSERVER_ADMIN_ADDR: ":8081"
+      RAMSERVER_ADMIN_ALLOW_NONLOOPBACK: "1" # the container listens on all of its interfaces; the port mapping above keeps it private
+      RAMSERVER_ADMIN_TOKENS_FILE: /run/ramserver/admin-tokens
+    volumes:
+      # Mount the directory, not the file: an editor which replaces the file would leave a single-file mount stale
+      - /etc/ramserver:/run/ramserver:ro

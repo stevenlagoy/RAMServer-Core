@@ -63,7 +63,7 @@ func TestCallsOnStoppedSessionReturn(t *testing.T) {
 			return nil
 		}},
 		{"Info", func() error {
-			if _, ok := s.Info(ctx); ok {
+			if _, ok := s.PublicInfo(ctx); ok {
 				return errors.New("ok = true, want false for a stopped session")
 			}
 			return nil
@@ -119,7 +119,7 @@ func TestPanickingRequestStillAnswers(t *testing.T) {
 		return nil
 	})
 	returnsWithin(t, func() error { // and the Session keeps working afterwards
-		if _, ok := s.Info(ctx); !ok {
+		if _, ok := s.PublicInfo(ctx); !ok {
 			return errors.New("info failed after a panicking request")
 		}
 		return nil

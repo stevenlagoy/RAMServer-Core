@@ -23,7 +23,7 @@ node "Player workstation (Windows or Linux)" as WS {
 
 node "Docker host (LAN)" as DH {
   node "Container: ramserver\nalpine:3.20, user uid 10001" as CT {
-    artifact "ramserver binary\nCGO_ENABLED=0, listens on :9000\nenv: RAMSERVER_ADDR, RAMSERVER_AUTOREADY (debug)" as BIN
+    artifact "ramserver binary\nCGO_ENABLED=0, listens on :8080\nenv: RAMSERVER_ADDR, RAMSERVER_AUTOREADY (debug)" as BIN
     database "SQLite file\n/app/data/*.db" as DB <<planned>>
   }
   database "Docker volume\nramserver-data" as VOL
@@ -43,10 +43,10 @@ node "Google Cloud VM (stretch goal)" as GCP <<planned>> {
   artifact "Same container image\nTLS required (NFR-10)" as GIMG <<planned>>
 }
 
-JC --> BIN : Protobuf over TCP :9000
-PC --> BIN : Protobuf over TCP :9000
-GF ..> BIN : Protobuf over TCP :9000
-LC --> BIN : Protobuf over TCP :9000
+JC --> BIN : Protobuf over TCP :8080
+PC --> BIN : Protobuf over TCP :8080
+GF ..> BIN : Protobuf over TCP :8080
+LC --> BIN : Protobuf over TCP :8080
 BIN ..> DB : in-process
 DB -- VOL : mounted
 S1 --> S2 : copy /out/ramserver

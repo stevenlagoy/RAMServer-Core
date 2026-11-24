@@ -35,8 +35,12 @@ const helpText = `Commands:
   action <payload>                         send ActionRequest to the current session
   ready [true|false]                       send SetReadyRequest for the current session (default: true)
   legal                                    send LegalActionsRequest for the current session
+  generate_token						   send GenerateJoinTokenRequest for the current session
   raw <text>                               send text as an arbitrary frame (not protobuf)
-  help                                     show this list`
+  help                                     show this list
+  quit                                     disconnect and shut the client down
+  exit                                     disconnect and shut the client down
+  `
 
 func dialServer(addr string) (net.Conn, error) {
 	if strings.HasPrefix(addr, "ws://") || strings.HasPrefix(addr, "wss://") {
@@ -106,6 +110,8 @@ func clientMessageKind(msg *pb.ClientMessage) string {
 		return "READY"
 	case *pb.ClientMessage_LegalActionsRequest:
 		return "LEGAL"
+	case *pb.ClientMessage_GenerateJoinTokenRequest:
+		return "GENERATE JOIN TOKEN"
 	default:
 		return "UNKNOWN"
 	}
@@ -225,6 +231,10 @@ func parseCommand(line, currentSession string) (msg *pb.ClientMessage, raw []byt
 			return nil, nil, errors.New("not in a session; create or join one first")
 		}
 		return &pb.ClientMessage{Payload: &pb.ClientMessage_LegalActionsRequest{LegalActionsRequest: &pb.LegalActionsRequest{
+			SessionId: currentSession,
+		}}}, nil, nil
+	case "generate_token":
+		return &pb.ClientMessage{Payload: &pb.ClientMessage_GenerateJoinTokenRequest{GenerateJoinTokenRequest: &pb.GenerateJoinTokenRequest{
 			SessionId: currentSession,
 		}}}, nil, nil
 	case "raw":
@@ -447,6 +457,10 @@ func main() {
 			case "help":
 				fmt.Println(helpText)
 				continue
+			case "quit":
+				fallthrough
+			case "exit":
+				return
 			}
 			if err := c.runCommand(line); err != nil {
 				fmt.Println("Error:", err)
