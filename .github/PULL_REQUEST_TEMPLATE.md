@@ -1,26 +1,70 @@
-# Title
+## Summary
 
-Short 1-2 sentence description describing the main purpose of this pull request.
+Describe what this pull request changes.
 
-Reference issue / PR numbers
+## Motivation
 
-## What changed
+Why is this change needed? Reference one or more related issue(s).
 
-What changed between the most recent pull request and this one?
+## Change type
 
-## Why
+- [ ] Core feature or improvement
+- [ ] Bug fix
+- [ ] New game ruleset
+- [ ] Client or featured-client change
+- [ ] Protocol change
+- [ ] Documentation
+- [ ] Build, test, or infrastructure
 
-What motivated this change? Reference GH issues, other pull requests, comments.
+## Implementation
 
-## How this was tested
+Describe the important implementation decisions and affected components.
 
-Include the names of new tests and actions.
+## Testing
 
-## Follow-up work
+List commands run and their results.
 
-What needs to be done in later pull requests?
+- [ ] Unit tests
+- [ ] Integration tests
+- [ ] Adversarial tests, where applicable
+- [ ] Cross-language conformance, where applicable
+- [ ] Formatting and linting
+- [ ] Buf lint/breaking checks, where applicable
 
-## Reviewer checklist
-- [ ] I have a specific reason for approving, stated as a PR comment (not just "LGTM")
-- [ ] Tests are included or updated for any new behavior
-- [ ] This does not touch `proto/` without the Protocol Designer as a reviewer
+## Compatibility and operational impact
+
+- [ ] No wire-protocol change
+- [ ] `docs/protocol.md` updated if protocol behavior changed
+- [ ] Persistence/configuration/deployment impacts documented
+- [ ] Migration or upgrade steps included, if needed
+
+Describe any impact not covered above.
+
+## Ruleset contribution checklist
+
+Complete this section for a new ruleset.
+
+- [ ] New package under `server/rulesets/<game-name>/`
+- [ ] Implements the current `game.Game` interface
+- [ ] Includes ruleset README and tests
+- [ ] Does not modify `server/internal/`
+- [ ] Uses the supported registration point
+- [ ] Includes integration evidence
+
+## Client contribution checklist
+
+Complete this section for a client or featured-client proposal.
+
+- [ ] Based on `clients/client-base`
+- [ ] Implements the published protocol independently
+- [ ] Includes build/run documentation and tests
+- [ ] Identifies game and protocol version
+- [ ] Includes conformance evidence, where available
+
+## Follow-up work and known limitations
+
+List anything intentionally left incomplete.
+
+## Issue
+
+Refs #
