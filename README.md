@@ -1,18 +1,18 @@
-# RAMServer Core
+# RAMServer-Core
 
-A Reusable Authoritative Multiplayer game server core. Game-agnostic server owns the game state and clients submit actions as requests.
+RAMServer-Core is a standalone, reusable, authoritative multiplayer server core for turn-based games. Many student and hobbyist multiplayer projects let each client track its own copy of the game state, which makes cheating trivial and forces every new game to provide its own solutions for networking, validation, and synchronization. RAMServer-Core addresses this by keeping the single authoritative game state on the server. Clients submit actions as requests over a documented protocol on TCP. The server validates each request against the current state, applies it only if legal, and sends each participant its permitted view of the new state. Game rules sit behind a game-agnostic interface, so a new game can be added as a plugin without changes to the transport, session, or persistence layers.
 
-**Project:** Reusable Authoritative Multiplayer Server Core (RAMServer)
+**Project:** Reusable Authoritative Multiplayer Server Core (RAMServer-Core)
 
 **Course:** CS 56000 Software Engineering
 
 **Term:** Fall 2026
 
 #### Team:
-- Heffelmire, Jacob : [heffjl03@pfw.edu](mailto:heffjl03@pfw.edu) / [jlheffelmire@gmail.com](mailto:jlheffelmire@gmail.com)
-- Jones, Hayden : [jonehm05@pfw.edu](mailto:jonehm05@pfw.edu) / [jonehayhayd@gmail.com](mailto:jonehayhayd@gmail.com)
-- LaGoy, Steven : [lagosm01@pfw.edu](mailto:lagosm01@pfw.edu) / [stevenlagoy@gmail.com](mailto:stevenlagoy@gmail.com)
-- Mao, Aidan : [maoal01@pfw.edu](mailto:maoal01@pfw.edu) / [aidanmao2005@gmail.com](mailto:aidanmao2005@gmail.com)
+- Heffelmire, Jacob : Database and Persistence Designer [heffjl03@pfw.edu](mailto:heffjl03@pfw.edu) / [jlheffelmire@gmail.com](mailto:jlheffelmire@gmail.com)
+- Jones, Hayden : Protocol Designer and Networking Engineer [jonehm05@pfw.edu](mailto:jonehm05@pfw.edu) / [jonehayhayd@gmail.com](mailto:jonehayhayd@gmail.com)
+- LaGoy, Steven : Project Manager and Lead Developer [lagosm01@pfw.edu](mailto:lagosm01@pfw.edu) / [stevenlagoy@gmail.com](mailto:stevenlagoy@gmail.com)
+- Mao, Aidan : Testing, Quality, and Release Engineer [maoal01@pfw.edu](mailto:maoal01@pfw.edu) / [aidanmao2005@gmail.com](mailto:aidanmao2005@gmail.com)
 
 ## Repository Layout
 
@@ -24,12 +24,6 @@ A Reusable Authoritative Multiplayer game server core. Game-agnostic server owns
 | `server/internal/`                  | Go server code (`github.com/stevenlagoy/ramserver-core/server`)      |
 | `server/game/`                      | Game interface for any ruleset running on RAMServer-Core             |
 | `server/rulesets/`                  | Implementations of the Game interface                                |
-| `server/rulesets/chess/`            | Ruleset for chess implementing the Game interface                    |
-| `clients/chess/compiled_client/`    | Compiled-language chess client implementation in Java and Kotlin     |
-| `clients/chess/interpreted_client/` | Interpreted-language chess client implementation in Python           |
-| `clients/gofish/systems_client/`    | Systems-language Go Fish client implementation in C and C++          |
-| `clients/gofish/web_client/`        | Web-based Go Fish client implementation in JavaScript and TypeScript |
-| `clients/tictactoe/client/`         | Tic-Tac-Toe client implementation by an LLM                          |
 | `docs/`                             | Team documentation for project management and communication          |
 | `scripts/`                          | Developer convenience scripts                                        |
 
@@ -44,7 +38,7 @@ Install these before doing anything else
 | Git            | 2.40+   | Everything            |
 | buf            | 1.4x    | Regenerating protobuf |
 
-Install `buf` (works on all three platforms, requires Go):
+Install `buf` (works on all target platforms, requires Go):
 
 ```
 go install github.com/bufbuild/buf/cmd/buf@latest
@@ -62,12 +56,12 @@ If `buf` is not found afterward, add Go's bin directory to your Path:
 **Linux / macOS (bash)**
 ```bash
 git clone https://github.com/stevenlagoy/ramserver-core.git
-cd ramserver-core
+cd RAMServer-Core
 ```
 
 ### 2. Generate protobuf code
 
-Generated code is not committed. Run this after cloning and after any change to files under `proto/`. The command is identical on all platforms:
+Generated code should not be committed. Run this after cloning and after any change to files under `proto/`. The command is identical on all target platforms:
 
 ```
 buf generate
@@ -75,43 +69,38 @@ buf generate
 
 ### 3. Run the server
 
-Identical on all platforms:
+#### With a Docker container
+
+Identical on all target platforms:
 
 ```
 docker compose up --build
 ```
 
-The server listens on `localhost:8080`. Stop it with `Ctrl+C` and remove the container with `docker compose down`.
+The server listens on `localhost:8080` by default. Stop it with `Ctrl+C` and remove the container with `docker compose down`.
 
-### 4. Run the server without Docker (faster iteration)
+### Without a Docker container
 
 **Linux / macOS (bash)**
 ```bash
 cd server
-go run ./cmd/ramserver --addr :8080
+go run ./cmd/ramserver
 ```
 
 **Windows (cmd)**
 ```cmd
 cd server
-go run .\cmd\ramserver --addr :8080
+go run .\cmd\ramserver
 ```
 
-### 5. Run the tests
+### 4. Run the tests
 
-**Linux / macOS (bash)**
+Identical on all target platforms:
+
 ```bash
 cd server
 go test -race ./...
 ```
-
-**Windows (PowerShell / cmd)**
-```cmd
-cd server
-go test -race ./...
-```
-
-`-race` requires a C toolchain on Windows. If it fails, drop the flag locally; CI runs the race detector on every pull request regardless.
 
 ## Convenience scripts
 
@@ -137,17 +126,6 @@ If PowerShell blocks any script, run:
 `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
 
 `leanclients.ps1 [count] [leanclient flags...]` opens one pane per client, named Player1 to PlayerN, and passes any extra flags (such as `-addr`) to every client. The server allows 4 connections per IP address by default (`MaxConnectionsOneIP`), so more than 4 local clients are refused.
-
-## Branches
-
-| Branch     | Owners   | Scope                           |
-|------------|----------|---------------------------------|
-| `main`     | All four | Protected; requires 4 approvals |
-| `server`   | All four | `server/`, `proto/`             |
-| `client-1` | Pair TBD | `clients/client-1/`             |
-| `client-2` | Pair TBD | `clients/client-2/`             |
-
-Rebase your branch onto `main` before opening a pull request.
 
 ## Documentation
 
