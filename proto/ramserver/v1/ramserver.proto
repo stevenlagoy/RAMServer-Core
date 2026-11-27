@@ -22,6 +22,7 @@ message ClientMessage {
     LegalActionsRequest legal_actions_request = 8;
     ListSessionsRequest list_sessions_request = 9;
     MatchHistoryRequest match_history_request = 10;
+    GenerateJoinTokenRequest generate_join_token_request = 11;
   }
 }
 
@@ -120,6 +121,11 @@ message LegalActionSpec {
   string description = 2;
 }
 
+// Sent to request that the current join token is replaced with a newly generated join token.
+message GenerateJoinTokenRequest {
+  string session_id = 1;
+}
+
 // Session snapshot, broadcast on membership, status, or game-state changes.
 message StateUpdate {
   string session_id = 1;
@@ -133,6 +139,7 @@ message StateUpdate {
   string owner_player_id = 9;
   // Game-defined key/value facts about state which don't require parsing encoded_view.
   map<string, string> annotations = 10;
+  string session_join_token = 11;
 }
 
 message SessionPlayer {
@@ -169,6 +176,7 @@ message SessionInfo {
   repeated SessionPlayer players = 4;
   string owner_player_id = 5;
   bool joinable = 6;
+  string join_token = 7;
 }
 
 message MatchHistoryRequest {

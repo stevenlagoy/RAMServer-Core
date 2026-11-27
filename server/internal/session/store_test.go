@@ -2,14 +2,64 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
+	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/stevenlagoy/ramserver-core/server/rulesets/StubGame"
 )
 
+// waitStopped fails unless s's Run goroutine exits within a second
+func waitStopped(t *testing.T, s *Session) {
+	t.Helper()
+	select {
+	case <-s.stopped:
+	case <-time.After(time.Second):
+		t.Fatal("the session's goroutine did not exit")
+	}
+}
+
+func TestLastLeaveRemovesAndStopsSession(t *testing.T) {
+	st := NewSessionStore(t.Context())
+	s, err := st.Create("sess-1", "stub", &StubGame.StubGame{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := newFakeSender()
+	if err := s.Join(t.Context(), "a", "Alice", 1, a); err != nil {
+		t.Fatal(err)
+	}
+	a.next(t)
+
+	s.Leave(t.Context(), "a")
+	waitStopped(t, s)
+	if _, ok := st.Get("sess-1"); ok {
+		t.Fatal("the empty session is still in the store")
+	}
+
+	// A caller still holding the session, such as matchmaking, gets an error instead of waiting forever
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := s.Join(ctx, "b", "Bob", 2, newFakeSender()); !errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("join on a stopped session: err = %v, want ErrSessionClosed", err)
+	}
+}
+
+func TestRemoveStopsSession(t *testing.T) {
+	st := NewSessionStore(t.Context())
+	s, err := st.Create("sess-1", "stub", &StubGame.StubGame{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Remove("sess-1")
+	waitStopped(t, s)
+}
+
 func TestNewStore(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(t.Context())
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
@@ -21,16 +71,13 @@ func TestNewStore(t *testing.T) {
 }
 
 func TestCreateAndGet(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(t.Context())
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	g := &StubGame.StubGame{}
-	s, err := st.Create(ctx, "sess-1", "chess", g, true)
+	s, err := st.Create("sess-1", "chess", g, true)
 	if err != nil {
 		t.Fatalf("err creating session: %v", err)
 	}
@@ -51,39 +98,33 @@ func TestCreateAndGet(t *testing.T) {
 }
 
 func TestCreateDuplicateID(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(t.Context())
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	g := &StubGame.StubGame{}
-	_, err := st.Create(ctx, "sess-1", "chess", g, true)
+	_, err := st.Create("sess-1", "chess", g, true)
 	if err != nil {
 		t.Fatalf("err creating session: %v", err)
 	}
 
-	_, err = st.Create(ctx, "sess-1", "checkers", g, true)
+	_, err = st.Create("sess-1", "checkers", g, true)
 	if err == nil {
 		t.Fatal("expected error when creating duplicate session")
 	}
 }
 
 func TestList(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(t.Context())
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	g := &StubGame.StubGame{}
-	st.Create(ctx, "sess-1", "chess", g, true)
-	st.Create(ctx, "sess-2", "chess", g, false)
-	st.Create(ctx, "sess-3", "checkers", g, true)
+	st.Create("sess-1", "chess", g, true)
+	st.Create("sess-2", "chess", g, false)
+	st.Create("sess-3", "checkers", g, true)
 
 	all := st.List("", false)
 	if len(all) != 3 {
@@ -107,16 +148,13 @@ func TestList(t *testing.T) {
 }
 
 func TestRemove(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(t.Context())
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	g := &StubGame.StubGame{}
-	st.Create(ctx, "sess-1", "chess", g, true)
+	st.Create("sess-1", "chess", g, true)
 
 	_, ok := st.Get("sess-1")
 	if !ok {
@@ -136,13 +174,10 @@ func TestRemove(t *testing.T) {
 }
 
 func TestSessionStoreConcurrency(t *testing.T) {
-	st := NewSessionStore()
+	st := NewSessionStore(t.Context())
 	if st == nil {
 		t.Fatalf("expected non-nil SessionStore")
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	var wg sync.WaitGroup
 	workers := 50
@@ -156,7 +191,7 @@ func TestSessionStoreConcurrency(t *testing.T) {
 				gameName = "checkers"
 			}
 
-			_, _ = st.Create(ctx, fmt.Sprintf("s-%d", id), gameName, &StubGame.StubGame{}, id%3 == 0)
+			_, _ = st.Create(fmt.Sprintf("s-%d", id), gameName, &StubGame.StubGame{}, id%3 == 0)
 		}(i)
 	}
 	wg.Wait()
@@ -171,4 +206,171 @@ func TestSessionStoreConcurrency(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func TestJoinWithCaseInsensitiveToken(t *testing.T) {
+	tests := []struct {
+		name      string
+		transform func(string) string
+	}{
+		{
+			name:      "exact case",
+			transform: func(token string) string { return token },
+		},
+		{
+			name:      "lowercase",
+			transform: strings.ToLower,
+		},
+		{
+			name:      "uppercase",
+			transform: strings.ToUpper,
+		},
+		{
+			name: "mixed case",
+			transform: func(token string) string {
+				var result strings.Builder
+				for i, r := range token {
+					if i%2 == 0 {
+						result.WriteString(strings.ToLower(string(r)))
+					} else {
+						result.WriteString(strings.ToUpper(string(r)))
+					}
+				}
+				return result.String()
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st := NewSessionStore(t.Context())
+
+			s, err := st.Create(
+				"sess-1",
+				"stub",
+				&StubGame.StubGame{},
+				true,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				st.Remove("sess-1")
+				waitStopped(t, s)
+			})
+
+			token := s.joinTokenValue()
+			if token == "" {
+				t.Fatal("expected session to have a join token")
+			}
+
+			suppliedToken := tt.transform(token)
+
+			fetched, ok := st.Get(suppliedToken)
+			if !ok {
+				t.Fatalf("failed to find session using token %q", suppliedToken)
+			}
+			if fetched != s {
+				t.Fatal("token lookup returned the wrong session")
+			}
+
+			sender := newFakeSender()
+			if err := fetched.Join(
+				t.Context(),
+				"client-1",
+				"Alice",
+				1,
+				sender,
+			); err != nil {
+				t.Fatalf("failed to join session using token %q: %v", suppliedToken, err)
+			}
+
+			if update := sender.next(t).GetStateUpdate(); update == nil {
+				t.Fatal("expected a state update after joining")
+			}
+		})
+	}
+}
+
+func TestJoinWithInvalidToken(t *testing.T) {
+	st := NewSessionStore(t.Context())
+
+	s, err := st.Create("sess-1", "stub", &StubGame.StubGame{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		st.Remove("sess-1")
+		waitStopped(t, s)
+	})
+
+	token := s.joinTokenValue()
+
+	tests := []struct {
+		name  string
+		token string
+	}{
+		{name: "incorrect token", token: token + "X"},
+		{name: "empty token", token: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, ok := st.Get(tt.token); ok {
+				t.Fatalf("unexpectedly found session using invalid token %q", tt.token)
+			}
+		})
+	}
+}
+
+func TestOldJoinTokenBecomesInvalidAfterRegeneration(t *testing.T) {
+	st := NewSessionStore(t.Context())
+
+	s, err := st.Create("sess-1", "stub", &StubGame.StubGame{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		st.Remove("sess-1")
+		waitStopped(t, s)
+	})
+
+	oldToken := s.joinTokenValue()
+	if oldToken == "" {
+		t.Fatal("expected session to have an initial join token")
+	}
+
+	// The session creator must join before generating a replacement token.
+	sender := newFakeSender()
+	if err := s.Join(t.Context(), "owner", "Alice", 1, sender); err != nil {
+		t.Fatal(err)
+	}
+	sender.next(t)
+
+	if err := s.GenerateJoinToken(t.Context(), "owner", 2); err != nil {
+		t.Fatalf("failed to generate replacement token: %v", err)
+	}
+
+	// Consume the resulting state update.
+	sender.next(t)
+
+	newToken := s.joinTokenValue()
+	if newToken == "" {
+		t.Fatal("expected a replacement join token")
+	}
+	if newToken == oldToken {
+		t.Fatal("expected replacement token to differ from old token")
+	}
+
+	if _, ok := st.Get(oldToken); ok {
+		t.Fatal("old join token should no longer resolve to the session")
+	}
+
+	fetched, ok := st.Get(newToken)
+	if !ok {
+		t.Fatal("new join token should resolve to the session")
+	}
+	if fetched != s {
+		t.Fatal("new join token resolved to the wrong session")
+	}
 }
