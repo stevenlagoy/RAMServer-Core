@@ -3,6 +3,7 @@ package gofish
 import (
 	"bytes"
 	"fmt"
+	"math/rand"
 	"slices"
 	"strconv"
 	"strings"
@@ -99,6 +100,14 @@ func (g *Game) NewState(order []string, roles map[string]game.Role) game.GameSta
 	}
 }
 
+func (g *Game) NewStateWithSeed(order []string, roles map[string]game.Role, seed int64) game.GameState {
+	state := g.NewState(order, roles).(State)
+	rand.New(rand.NewSource(seed)).Shuffle(len(state.cards), func(i, j int) {
+		state.cards[i], state.cards[j] = state.cards[j], state.cards[i]
+	})
+	return state
+}
+
 func (g *Game) Validate(s game.GameState, a game.Action) error {
 	state := s.(State)
 	normalized, err := state.decodeClientAction(a.ActorID, a.Payload)
@@ -135,6 +144,9 @@ func (g *Game) Apply(s game.GameState, a game.Action) game.GameState {
 		next.draw(action.TopUpFromPool.from, action.card)
 		next.recentAction = action
 	case DrawFromPool:
+		next.draw(action.from, action.card)
+		next.recentAction = action
+	case MakeCatchFromPool:
 		next.draw(action.from, action.card)
 		next.recentAction = action
 	case TopUpFromPool:
@@ -203,6 +215,9 @@ func (s State) bindAction(action Action) Action {
 		a.from = player(a.from.order)
 		return a
 	case DrawFromPool:
+		a.from = player(a.from.order)
+		return a
+	case MakeCatchFromPool:
 		a.from = player(a.from.order)
 		return a
 	case TopUpFromPool:
@@ -338,7 +353,7 @@ A player may:
 		If their request has received a response with cards:
 			Restart their own turn (may send another request to any opponent)
 		If their request has received a "Go Fish" response:
-			Draw a card from the pool
+			Draw a card from the pool; if it matches the requested rank on their turn, make a catch and ask again
 		If hold 4 cards of any rank: place all complete books
 		If hold no cards:
 			Draw a card from the pool
@@ -375,15 +390,20 @@ func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec
 		if len(cards) == 0 { // Do we have any requested cards?
 			// Go fish!
 			return []game.ActionSpec{{
-				Payload:     CardResponse{player, action.from, []*Card{}}.Encode(),
+				Payload: CardResponse{
+					from:          player,
+					to:            action.from,
+					cards:         []*Card{},
+					requestedRank: action.rank,
+				}.Encode(),
 				Description: fmt.Sprintf("Tell Player %d to Go Fish!", action.from.order+1),
 			}}
 		} // We have a requested card
 		if len(player.hand) == len(cards) { // There would be no cards left after responding to the request
 			return []game.ActionSpec{{
 				Payload: CardResponseAndTopUp{
-					CardResponse{player, action.from, cards},
-					TopUpFromPool{player, state.topOfPool()},
+					CardResponse{from: player, to: action.from, cards: cards},
+					TopUpFromPool{from: player, card: state.topOfPool()},
 				}.Encode(),
 				Description: fmt.Sprintf(
 					"Send the requested %s to Player %d, and draw one card from the pool",
@@ -392,7 +412,7 @@ func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec
 			}}
 		} // Have more cards than were requested
 		return []game.ActionSpec{{
-			Payload: CardResponse{player, action.from, cards}.Encode(),
+			Payload: CardResponse{from: player, to: action.from, cards: cards}.Encode(),
 			Description: fmt.Sprintf(
 				"Send the requested %s to Player %d",
 				action.rank.plural, action.from.order+1,
@@ -408,19 +428,20 @@ func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec
 		}
 		if len(resp.cards) > 0 { // The response contains cards
 			// Must request cards again from another player
-			possibleRequests := state.AllValidRequestsBy(player)
-			legals := make([]game.ActionSpec, 0, len(possibleRequests))
-			for _, request := range possibleRequests {
-				legals = append(legals, game.ActionSpec{
-					Payload:     request.Encode(),
-					Description: fmt.Sprintf("Request all %s from Player %d", request.rank.plural, request.to.order+1),
-				})
-			}
-			return legals
+			return validRequestActions(state, player)
 		} else { // Go Fish!
-			// Draw from pool
+			card := state.topOfPool()
+			if resp.requestedRank.value != 0 &&
+				card != nil &&
+				card.Rank == resp.requestedRank &&
+				player.order == state.CurrentTurn().order {
+				return []game.ActionSpec{{
+					Payload:     MakeCatchFromPool{player, card}.Encode(),
+					Description: "Draw a card from the pool",
+				}}
+			}
 			return []game.ActionSpec{{
-				Payload:     DrawFromPool{player, state.topOfPool()}.Encode(),
+				Payload:     DrawFromPool{player, card}.Encode(),
 				Description: "Draw a card from the pool",
 			}}
 		}
@@ -429,11 +450,30 @@ func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec
 		if len(heldBooks) > 0 { // Any valid held books?
 			// Must place a book
 			return []game.ActionSpec{{
-				Payload:     PlaceBook{player, heldBooks[0]}.Encode(),
+				Payload:     PlaceBook{from: player, rank: heldBooks[0]}.Encode(),
 				Description: "Place a book of " + heldBooks[0].plural,
 			}}
 		} // No valid held books
 		// End turn
+		return []game.ActionSpec{{
+			Payload:     EndTurn{player, state.NextTurn(), state.turnNumber + 1}.Encode(),
+			Description: "End your turn",
+		}}
+	case MakeCatchFromPool:
+		heldBooks := player.ValidHeldBooks()
+		if len(heldBooks) > 0 {
+			return []game.ActionSpec{{
+				Payload: PlaceBook{
+					from:         player,
+					rank:         heldBooks[0],
+					continueTurn: true,
+				}.Encode(),
+				Description: "Place a book of " + heldBooks[0].plural,
+			}}
+		}
+		if requests := validRequestActions(state, player); len(requests) > 0 {
+			return requests
+		}
 		return []game.ActionSpec{{
 			Payload:     EndTurn{player, state.NextTurn(), state.turnNumber + 1}.Encode(),
 			Description: "End your turn",
@@ -442,7 +482,11 @@ func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec
 		if len(player.hand) == 0 { // Is our hand empty?
 			// Top up from pool
 			return []game.ActionSpec{{
-				Payload:     TopUpFromPool{player, state.topOfPool()}.Encode(),
+				Payload: TopUpFromPool{
+					from:         player,
+					card:         state.topOfPool(),
+					continueTurn: action.continueTurn,
+				}.Encode(),
 				Description: "Draw a card from the pool",
 			}}
 		} // We have cards in hand
@@ -450,26 +494,58 @@ func (g *Game) LegalActions(s game.GameState, playerID string) []game.ActionSpec
 		if len(heldBooks) > 0 { // Any valid held books?
 			// Must place a book
 			return []game.ActionSpec{{
-				Payload:     PlaceBook{player, heldBooks[0]}.Encode(),
+				Payload: PlaceBook{
+					from:         player,
+					rank:         heldBooks[0],
+					continueTurn: action.continueTurn,
+				}.Encode(),
 				Description: "Place a book of " + heldBooks[0].plural,
 			}}
 		} // No valid held books
+		if action.continueTurn {
+			if requests := validRequestActions(state, player); len(requests) > 0 {
+				return requests
+			}
+		}
 		// End turn
 		return []game.ActionSpec{{
 			Payload:     EndTurn{player, state.NextTurn(), state.turnNumber + 1}.Encode(),
 			Description: "End your turn",
 		}}
-	case DealCards, EndTurn: // True turn after dealing, or the start of a new turn
-		// Must request cards from another player with cards
-		possibleRequests := state.AllValidRequestsBy(player)
-		legals := make([]game.ActionSpec, 0, len(possibleRequests))
-		for _, request := range possibleRequests {
-			legals = append(legals, game.ActionSpec{
-				Payload:     request.Encode(),
-				Description: fmt.Sprintf("Request all %s from Player %d", request.rank.plural, request.to.order+1),
-			})
+	case TopUpFromPool:
+		if heldBooks := player.ValidHeldBooks(); len(heldBooks) > 0 {
+			return []game.ActionSpec{{
+				Payload: PlaceBook{
+					from:         player,
+					rank:         heldBooks[0],
+					continueTurn: action.continueTurn,
+				}.Encode(),
+				Description: "Place a book of " + heldBooks[0].plural,
+			}}
 		}
-		return legals
+		if action.continueTurn {
+			if requests := validRequestActions(state, player); len(requests) > 0 {
+				return requests
+			}
+		}
+		return []game.ActionSpec{{
+			Payload:     EndTurn{player, state.NextTurn(), state.turnNumber + 1}.Encode(),
+			Description: "End your turn",
+		}}
+	case DealCards, EndTurn: // True turn after dealing, or the start of a new turn
+		return validRequestActions(state, player)
 	}
 	panic("the most recent action was of an invalid type; cannot generate legal actions")
+}
+
+func validRequestActions(state State, player *Player) []game.ActionSpec {
+	possibleRequests := state.AllValidRequestsBy(player)
+	legals := make([]game.ActionSpec, 0, len(possibleRequests))
+	for _, request := range possibleRequests {
+		legals = append(legals, game.ActionSpec{
+			Payload:     request.Encode(),
+			Description: fmt.Sprintf("Request all %s from Player %d", request.rank.plural, request.to.order+1),
+		})
+	}
+	return legals
 }

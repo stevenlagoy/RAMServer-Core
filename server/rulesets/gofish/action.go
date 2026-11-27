@@ -13,6 +13,9 @@ const (
 	actionTopUpFromPool
 	actionEndTurn
 	actionDealCards
+	actionMakeCatchFromPool
+	actionPlaceBookAndContinue
+	actionTopUpFromPoolAndContinue
 )
 
 type Action interface {
@@ -56,9 +59,10 @@ Respond to a request:
 	If have any cards of requested rank, send them. Otherwise, say "Go fish."
 */
 type CardResponse struct {
-	from  *Player
-	to    *Player
-	cards []*Card
+	from          *Player
+	to            *Player
+	cards         []*Card
+	requestedRank Rank
 }
 
 func (a CardResponse) From() *Player {
@@ -69,7 +73,7 @@ func (a CardResponse) To() *Player {
 	return a.to
 }
 
-// 5 or more bytes: type, from player order, to player order, number of cards, and one byte for each card. If no cards, "Go fish"
+// Empty responses append the requested rank after the card count.
 func (a CardResponse) Encode() []byte {
 	from := uint8(a.from.order)
 	to := uint8(a.to.order)
@@ -78,7 +82,11 @@ func (a CardResponse) Encode() []byte {
 	for _, card := range a.cards {
 		cards = append(cards, card.Encode())
 	}
-	return append([]byte{actionCardResponse, from, to, numCards}, cards...)
+	encoded := append([]byte{actionCardResponse, from, to, numCards}, cards...)
+	if len(a.cards) == 0 && a.requestedRank.value > 0 {
+		encoded = append(encoded, uint8(a.requestedRank.value))
+	}
+	return encoded
 }
 
 type CardResponseAndTopUp struct {
@@ -114,8 +122,9 @@ Place a book:
 	Can be repeated in one turn.
 */
 type PlaceBook struct {
-	from *Player
-	rank Rank
+	from         *Player
+	rank         Rank
+	continueTurn bool
 }
 
 func (a PlaceBook) From() *Player {
@@ -130,7 +139,11 @@ func (a PlaceBook) To() *Player {
 func (a PlaceBook) Encode() []byte {
 	player := uint8(a.from.order)
 	rank := uint8(a.rank.value)
-	return []byte{actionPlaceBook, player, rank}
+	actionType := actionPlaceBook
+	if a.continueTurn {
+		actionType = actionPlaceBookAndContinue
+	}
+	return []byte{actionType, player, rank}
 }
 
 /*
@@ -158,14 +171,33 @@ func (a DrawFromPool) Encode() []byte {
 	return []byte{actionDrawFromPool, player, card}
 }
 
+// MakeCatchFromPool draws the requested rank and lets the current player ask again.
+type MakeCatchFromPool struct {
+	from *Player
+	card *Card
+}
+
+func (a MakeCatchFromPool) From() *Player {
+	return a.from
+}
+
+func (a MakeCatchFromPool) To() *Player {
+	return a.from
+}
+
+func (a MakeCatchFromPool) Encode() []byte {
+	return []byte{actionMakeCatchFromPool, uint8(a.from.order), a.card.Encode()}
+}
+
 /*
 Take a card from the pool:
 
 	If hold no cards, draw top card from the pool.
 */
 type TopUpFromPool struct {
-	from *Player
-	card *Card
+	from         *Player
+	card         *Card
+	continueTurn bool
 }
 
 func (a TopUpFromPool) From() *Player {
@@ -180,7 +212,11 @@ func (a TopUpFromPool) To() *Player {
 func (a TopUpFromPool) Encode() []byte {
 	player := uint8(a.from.order)
 	card := a.card.Encode()
-	return []byte{actionTopUpFromPool, player, card}
+	actionType := actionTopUpFromPool
+	if a.continueTurn {
+		actionType = actionTopUpFromPoolAndContinue
+	}
+	return []byte{actionType, player, card}
 }
 
 type EndTurn struct {
@@ -237,18 +273,35 @@ func DecodeAction(encoded []byte) (Action, int, error) {
 		}
 		return CardRequest{player(encoded[1]), player(encoded[2]), RankFromValue[int(encoded[3])]}, 4, nil
 	case actionCardResponse:
-		if len(encoded) < 4 || int(encoded[3]) != len(encoded)-4 {
+		if len(encoded) < 4 {
 			return nil, 0, fmt.Errorf("invalid card response")
 		}
-		cards := make([]*Card, 0, encoded[3])
-		for _, value := range encoded[4:] {
+		numCards := int(encoded[3])
+		hasRequestedRank := numCards == 0 && len(encoded) == 5
+		if len(encoded) != 4+numCards && !hasRequestedRank {
+			return nil, 0, fmt.Errorf("invalid card response")
+		}
+		var requestedRank Rank
+		if hasRequestedRank {
+			if encoded[4] < 1 || encoded[4] > 13 {
+				return nil, 0, fmt.Errorf("invalid requested rank")
+			}
+			requestedRank = RankFromValue[int(encoded[4])]
+		}
+		cards := make([]*Card, 0, numCards)
+		for _, value := range encoded[4 : 4+numCards] {
 			decoded, err := card(value)
 			if err != nil {
 				return nil, 0, err
 			}
 			cards = append(cards, decoded)
 		}
-		return CardResponse{player(encoded[1]), player(encoded[2]), cards}, len(encoded), nil
+		return CardResponse{
+			from:          player(encoded[1]),
+			to:            player(encoded[2]),
+			cards:         cards,
+			requestedRank: requestedRank,
+		}, len(encoded), nil
 	case actionCardResponseAndTopUp:
 		if len(encoded) < 5 || int(encoded[4]) != len(encoded)-5 {
 			return nil, 0, fmt.Errorf("invalid card response and top-up")
@@ -266,15 +319,19 @@ func DecodeAction(encoded []byte) (Action, int, error) {
 			cards = append(cards, decoded)
 		}
 		return CardResponseAndTopUp{
-			CardResponse:  CardResponse{player(encoded[1]), player(encoded[2]), cards},
-			TopUpFromPool: TopUpFromPool{player(encoded[1]), drawn},
+			CardResponse:  CardResponse{from: player(encoded[1]), to: player(encoded[2]), cards: cards},
+			TopUpFromPool: TopUpFromPool{from: player(encoded[1]), card: drawn},
 		}, len(encoded), nil
-	case actionPlaceBook:
+	case actionPlaceBook, actionPlaceBookAndContinue:
 		if len(encoded) != 3 || encoded[2] < 1 || encoded[2] > 13 {
 			return nil, 0, fmt.Errorf("invalid place-book action")
 		}
-		return PlaceBook{player(encoded[1]), RankFromValue[int(encoded[2])]}, 3, nil
-	case actionDrawFromPool, actionTopUpFromPool:
+		return PlaceBook{
+			from:         player(encoded[1]),
+			rank:         RankFromValue[int(encoded[2])],
+			continueTurn: encoded[0] == actionPlaceBookAndContinue,
+		}, 3, nil
+	case actionDrawFromPool, actionMakeCatchFromPool, actionTopUpFromPool, actionTopUpFromPoolAndContinue:
 		if len(encoded) != 3 {
 			return nil, 0, fmt.Errorf("invalid draw action")
 		}
@@ -285,7 +342,14 @@ func DecodeAction(encoded []byte) (Action, int, error) {
 		if encoded[0] == actionDrawFromPool {
 			return DrawFromPool{player(encoded[1]), drawn}, 3, nil
 		}
-		return TopUpFromPool{player(encoded[1]), drawn}, 3, nil
+		if encoded[0] == actionMakeCatchFromPool {
+			return MakeCatchFromPool{player(encoded[1]), drawn}, 3, nil
+		}
+		return TopUpFromPool{
+			from:         player(encoded[1]),
+			card:         drawn,
+			continueTurn: encoded[0] == actionTopUpFromPoolAndContinue,
+		}, 3, nil
 	case actionEndTurn:
 		if len(encoded) != 4 {
 			return nil, 0, fmt.Errorf("invalid end-turn action")

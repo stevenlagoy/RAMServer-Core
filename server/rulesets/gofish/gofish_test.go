@@ -138,6 +138,34 @@ func TestNewStateCreatesOneDeckAndExcludesSpectators(t *testing.T) {
 	}
 }
 
+func TestNewStateWithSeedShufflesReproducibly(t *testing.T) {
+	g := &Game{}
+	order := []string{"alice", "bob", "dealer"}
+	roles := map[string]game.Role{
+		"alice":  game.RolePlayer,
+		"bob":    game.RolePlayer,
+		"dealer": RoleDealer,
+	}
+	first := g.NewStateWithSeed(order, roles, 1234).(State)
+	repeat := g.NewStateWithSeed(order, roles, 1234).(State)
+	different := g.NewStateWithSeed(order, roles, 5678).(State)
+
+	encoded := func(state State) []byte {
+		cards := make([]byte, len(state.cards))
+		for i, card := range state.cards {
+			cards[i] = card.Encode()
+		}
+		return cards
+	}
+	firstDeck := encoded(first)
+	if !bytes.Equal(firstDeck, encoded(repeat)) {
+		t.Fatal("same seed produced different decks")
+	}
+	if bytes.Equal(firstDeck, encoded(different)) {
+		t.Fatal("different seeds produced the same deck")
+	}
+}
+
 func TestNextTurnWrapsAndSkipsEmptyHands(t *testing.T) {
 	state := testState(
 		[]*Card{{Suit: Spades, Rank: Ace}},
@@ -285,8 +313,12 @@ func TestActionEncodings(t *testing.T) {
 	}{
 		{"request", (CardRequest{from: from, to: to, rank: Queen}).Encode(), []byte{actionCardRequest, 1, 2, 12}},
 		{"response", (CardResponse{from: from, to: to, cards: []*Card{card}}).Encode(), []byte{actionCardResponse, 1, 2, 1, card.Encode()}},
+		{"go fish response", (CardResponse{from: from, to: to, requestedRank: Queen}).Encode(), []byte{actionCardResponse, 1, 2, 0, 12}},
 		{"place book", (PlaceBook{from: from, rank: Queen}).Encode(), []byte{actionPlaceBook, 1, 12}},
+		{"place book and continue", (PlaceBook{from: from, rank: Queen, continueTurn: true}).Encode(), []byte{actionPlaceBookAndContinue, 1, 12}},
 		{"draw", (DrawFromPool{from: from, card: card}).Encode(), []byte{actionDrawFromPool, 1, card.Encode()}},
+		{"make catch", (MakeCatchFromPool{from: from, card: card}).Encode(), []byte{actionMakeCatchFromPool, 1, card.Encode()}},
+		{"top up and continue", (TopUpFromPool{from: from, card: card, continueTurn: true}).Encode(), []byte{actionTopUpFromPoolAndContinue, 1, card.Encode()}},
 		{"end turn", (EndTurn{from: from, to: to, newOrder: 3}).Encode(), []byte{actionEndTurn, 1, 2, 3}},
 	}
 	for _, tt := range tests {
@@ -303,13 +335,17 @@ func TestDecodeActionRoundTripsEveryActionType(t *testing.T) {
 	actions := []Action{
 		CardRequest{from: from, to: to, rank: Queen},
 		CardResponse{from: from, to: to, cards: []*Card{card}},
+		CardResponse{from: from, to: to, requestedRank: Queen},
 		CardResponseAndTopUp{
 			CardResponse:  CardResponse{from: from, to: to, cards: []*Card{card}},
 			TopUpFromPool: TopUpFromPool{from: from, card: card},
 		},
 		PlaceBook{from: from, rank: Queen},
+		PlaceBook{from: from, rank: Queen, continueTurn: true},
 		DrawFromPool{from: from, card: card},
+		MakeCatchFromPool{from: from, card: card},
 		TopUpFromPool{from: from, card: card},
+		TopUpFromPool{from: from, card: card, continueTurn: true},
 		EndTurn{from: from, to: to, newOrder: 3},
 		DealCards{dealer: from, first: to},
 	}
@@ -584,6 +620,157 @@ func TestViewForEncodesPrivateHandAndPublicPlayerData(t *testing.T) {
 	}
 	if _, err := state.viewFor("missing"); err == nil {
 		t.Error("viewFor accepted an unknown player")
+	}
+}
+
+func TestGoFishCatchAllowsAnotherQuestionOnlyForMatchingRankOnTurn(t *testing.T) {
+	tests := []struct {
+		name       string
+		drawnRank  Rank
+		turnNumber int
+		wantCatch  bool
+	}{
+		{"matching rank on turn", Ace, 0, true},
+		{"different rank", King, 0, false},
+		{"matching rank off turn", Ace, 1, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := testState(
+				[]*Card{{Suit: Spades, Rank: Ace}},
+				[]*Card{{Suit: Hearts, Rank: King}},
+				nil,
+				[]*Card{{Suit: Diamonds, Rank: tt.drawnRank}},
+			)
+			state.turnNumber = tt.turnNumber
+			state.recentAction = CardRequest{
+				from: &state.players[0],
+				to:   &state.players[1],
+				rank: Ace,
+			}
+			g := &Game{}
+
+			response := g.LegalActions(state, "bob")
+			if len(response) != 1 {
+				t.Fatalf("requestee has %d legal actions, want one Go Fish response", len(response))
+			}
+			decodedResponse, _, err := DecodeAction(response[0].Payload)
+			if err != nil {
+				t.Fatalf("DecodeAction(Go Fish response): %v", err)
+			}
+			if got := decodedResponse.(CardResponse).requestedRank; got != Ace {
+				t.Fatalf("Go Fish response requested rank = %v, want Ace", got)
+			}
+			state = g.Apply(state, game.Action{ActorID: "bob", Payload: response[0].Payload}).(State)
+
+			draw := g.LegalActions(state, "alice")
+			if len(draw) != 1 {
+				t.Fatalf("requester has %d legal actions, want one draw", len(draw))
+			}
+			if err := g.Validate(state, game.Action{ActorID: "alice", Payload: []byte(draw[0].Description)}); err != nil {
+				t.Fatalf("Validate(draw description) returned %v", err)
+			}
+			action, _, err := DecodeAction(draw[0].Payload)
+			if err != nil {
+				t.Fatalf("DecodeAction(draw): %v", err)
+			}
+			_, gotCatch := action.(MakeCatchFromPool)
+			if gotCatch != tt.wantCatch {
+				t.Errorf("next action = %T, want catch=%v", action, tt.wantCatch)
+			}
+			state = g.Apply(state, game.Action{ActorID: "alice", Payload: draw[0].Payload}).(State)
+
+			legal := g.LegalActions(state, "alice")
+			if tt.wantCatch {
+				if len(legal) != 1 {
+					t.Fatalf("caught player has %d legal actions, want one request", len(legal))
+				}
+				action, _, err := DecodeAction(legal[0].Payload)
+				if err != nil {
+					t.Fatalf("DecodeAction(request): %v", err)
+				}
+				request, ok := action.(CardRequest)
+				if !ok || request.rank != Ace || request.to.order != state.players[1].order {
+					t.Errorf("legal action = %#v, want an ace request to bob", action)
+				}
+				if got := (&Game{}).ActiveTurn(state); len(got) != 1 || got[0] != "alice" {
+					t.Errorf("turn after catch = %v, want [alice]", got)
+				}
+				if got := g.LegalActions(state, "bob"); len(got) != 0 {
+					t.Errorf("off-turn bob has %d legal actions, want none", len(got))
+				}
+			} else {
+				if len(legal) != 1 {
+					t.Fatalf("player has %d legal actions after a miss, want one end-turn action", len(legal))
+				}
+				if action, _, err := DecodeAction(legal[0].Payload); err != nil {
+					t.Fatalf("DecodeAction(end turn): %v", err)
+				} else if _, ok := action.(EndTurn); !ok {
+					t.Errorf("legal action = %T, want EndTurn", action)
+				}
+			}
+		})
+	}
+}
+
+func TestGoFishCatchKeepsExtraQuestionAfterBookAndTopUp(t *testing.T) {
+	state := testState(
+		[]*Card{
+			{Suit: Spades, Rank: Ace},
+			{Suit: Hearts, Rank: Ace},
+			{Suit: Clubs, Rank: Ace},
+		},
+		[]*Card{{Suit: Hearts, Rank: King}},
+		nil,
+		[]*Card{{Suit: Diamonds, Rank: Ace}, {Suit: Diamonds, Rank: Two}},
+	)
+	state.recentAction = CardRequest{from: &state.players[0], to: &state.players[1], rank: Ace}
+	g := &Game{}
+
+	response := g.LegalActions(state, "bob")[0]
+	state = g.Apply(state, game.Action{ActorID: "bob", Payload: response.Payload}).(State)
+	draw := g.LegalActions(state, "alice")[0]
+	state = g.Apply(state, game.Action{ActorID: "alice", Payload: draw.Payload}).(State)
+	place := g.LegalActions(state, "alice")[0]
+	action, _, err := DecodeAction(place.Payload)
+	if err != nil {
+		t.Fatalf("DecodeAction(place book): %v", err)
+	}
+	placedBook, ok := action.(PlaceBook)
+	if !ok || !placedBook.continueTurn {
+		t.Fatalf("action after completing a book = %#v, want continuing PlaceBook", action)
+	}
+	state = g.Apply(state, game.Action{ActorID: "alice", Payload: place.Payload}).(State)
+
+	topUps := g.LegalActions(state, "alice")
+	if len(topUps) != 1 {
+		t.Fatalf("caught player has %d top-up actions after emptying hand, want one", len(topUps))
+	}
+	topUp := topUps[0]
+	action, _, err = DecodeAction(topUp.Payload)
+	if err != nil {
+		t.Fatalf("DecodeAction(top-up): %v", err)
+	}
+	toppedUp, ok := action.(TopUpFromPool)
+	if !ok || !toppedUp.continueTurn {
+		t.Fatalf("action after emptying hand = %#v, want continuing TopUpFromPool", action)
+	}
+	state = g.Apply(state, game.Action{ActorID: "alice", Payload: topUp.Payload}).(State)
+
+	legal := g.LegalActions(state, "alice")
+	if len(legal) == 0 {
+		t.Fatal("caught player has no legal actions after placing a book and topping up")
+	}
+	for _, spec := range legal {
+		action, _, err = DecodeAction(spec.Payload)
+		if err != nil {
+			t.Fatalf("DecodeAction(request): %v", err)
+		}
+		request, ok := action.(CardRequest)
+		if !ok || request.rank != Two {
+			t.Errorf("legal action = %#v, want a request for twos", action)
+		}
 	}
 }
 

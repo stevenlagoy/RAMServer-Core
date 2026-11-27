@@ -74,7 +74,12 @@ var textActionGrammars = []textActionGrammar{
 			if request.to == nil || request.to.id != actor.id {
 				return nil, fmt.Errorf("this player was not asked for cards")
 			}
-			return CardResponse{from: actor, to: request.from, cards: []*Card{}}, nil
+			return CardResponse{
+				from:          actor,
+				to:            request.from,
+				cards:         []*Card{},
+				requestedRank: request.rank,
+			}, nil
 		},
 	},
 	{
@@ -91,7 +96,12 @@ var textActionGrammars = []textActionGrammar{
 			if request.from.order != order {
 				return nil, fmt.Errorf("requested player does not match Player %d", order+1)
 			}
-			return CardResponse{from: actor, to: request.from, cards: []*Card{}}, nil
+			return CardResponse{
+				from:          actor,
+				to:            request.from,
+				cards:         []*Card{},
+				requestedRank: request.rank,
+			}, nil
 		},
 	},
 	{
@@ -117,8 +127,12 @@ var textActionGrammars = []textActionGrammar{
 		patterns:     []textActionPattern{{regexp: regexp.MustCompile(`(?i)^place(?: (?:a )?book(?: of)?| a)?\s+(.+)$`), captures: map[string]int{"rank": 1}}},
 		fieldNames:   []string{"rank"},
 		fieldParsers: []textFieldParser{parseRankField},
-		build: func(_ State, actor *Player, fields map[string]any) (Action, error) {
-			return PlaceBook{from: actor, rank: fields["rank"].(Rank)}, nil
+		build: func(state State, actor *Player, fields map[string]any) (Action, error) {
+			return PlaceBook{
+				from:         actor,
+				rank:         fields["rank"].(Rank),
+				continueTurn: continuingCatchTurn(state.recentAction),
+			}, nil
 		},
 	},
 	{
@@ -129,7 +143,7 @@ var textActionGrammars = []textActionGrammar{
 			if card == nil {
 				return nil, fmt.Errorf("there is no card in the pool")
 			}
-			return DrawFromPool{from: actor, card: card}, nil
+			return poolDrawAction(state, actor, card), nil
 		},
 	},
 	{
@@ -141,13 +155,17 @@ var textActionGrammars = []textActionGrammar{
 				if card == nil {
 					return nil, fmt.Errorf("there is no card in the pool")
 				}
-				return TopUpFromPool{from: actor, card: card}, nil
+				return TopUpFromPool{
+					from:         actor,
+					card:         card,
+					continueTurn: continuingCatchTurn(state.recentAction),
+				}, nil
 			}
 			card := state.topOfPool()
 			if card == nil {
 				return nil, fmt.Errorf("there is no card in the pool")
 			}
-			return DrawFromPool{from: actor, card: card}, nil
+			return poolDrawAction(state, actor, card), nil
 		},
 	},
 	{
@@ -157,8 +175,8 @@ var textActionGrammars = []textActionGrammar{
 		},
 		fieldNames:   []string{"card"},
 		fieldParsers: []textFieldParser{parseCardField},
-		build: func(_ State, actor *Player, fields map[string]any) (Action, error) {
-			return DrawFromPool{from: actor, card: fields["card"].(*Card)}, nil
+		build: func(state State, actor *Player, fields map[string]any) (Action, error) {
+			return poolDrawAction(state, actor, fields["card"].(*Card)), nil
 		},
 	},
 	{
@@ -169,7 +187,11 @@ var textActionGrammars = []textActionGrammar{
 			if card == nil {
 				return nil, fmt.Errorf("there is no card in the pool")
 			}
-			return TopUpFromPool{from: actor, card: card}, nil
+			return TopUpFromPool{
+				from:         actor,
+				card:         card,
+				continueTurn: continuingCatchTurn(state.recentAction),
+			}, nil
 		},
 	},
 	{
@@ -179,8 +201,12 @@ var textActionGrammars = []textActionGrammar{
 		},
 		fieldNames:   []string{"card"},
 		fieldParsers: []textFieldParser{parseCardField},
-		build: func(_ State, actor *Player, fields map[string]any) (Action, error) {
-			return TopUpFromPool{from: actor, card: fields["card"].(*Card)}, nil
+		build: func(state State, actor *Player, fields map[string]any) (Action, error) {
+			return TopUpFromPool{
+				from:         actor,
+				card:         fields["card"].(*Card),
+				continueTurn: continuingCatchTurn(state.recentAction),
+			}, nil
 		},
 	},
 	{
@@ -314,6 +340,29 @@ var textActionGrammars = []textActionGrammar{
 			return CardResponse{from: actor, to: to, cards: fields["cards"].([]*Card)}, nil
 		},
 	},
+}
+
+func poolDrawAction(state State, actor *Player, card *Card) Action {
+	if response, ok := state.recentAction.(CardResponse); ok &&
+		len(response.cards) == 0 &&
+		response.requestedRank == card.Rank &&
+		actor.order == state.CurrentTurn().order {
+		return MakeCatchFromPool{from: actor, card: card}
+	}
+	return DrawFromPool{from: actor, card: card}
+}
+
+func continuingCatchTurn(action Action) bool {
+	switch a := action.(type) {
+	case MakeCatchFromPool:
+		return true
+	case PlaceBook:
+		return a.continueTurn
+	case TopUpFromPool:
+		return a.continueTurn
+	default:
+		return false
+	}
 }
 
 func parsePlayerField(text string) (any, error) {
