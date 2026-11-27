@@ -15,6 +15,7 @@ import (
 
 	"github.com/stevenlagoy/ramserver-core/server/game"
 	pb "github.com/stevenlagoy/ramserver-core/server/gen/ramserver/v1"
+	"github.com/stevenlagoy/ramserver-core/server/internal/match"
 	"github.com/stevenlagoy/ramserver-core/server/internal/transport"
 )
 
@@ -600,8 +601,16 @@ func TestMatchResultCarriesReasonAndTurnsAndIsKeptInHistory(t *testing.T) {
 		result := f.next(t).GetMatchResult()
 		winners := result.GetWinnerPlayerIds()
 		if result == nil || result.GetDraw() || len(winners) != 1 || winners[0] != "a" ||
-			result.GetTerminationReason() != "TEST_REASON" || result.GetTurns() != 4 {
+			result.GetTerminationReason() != "TEST_REASON" || result.GetTurns() != 4 ||
+			result.GetRandomSeed() == 0 {
 			t.Fatalf("%s: unexpected MatchResult %v", name, result)
+		}
+		if name == "a" {
+			matchSeed := result.GetRandomSeed()
+			history := s.History(ctx)
+			if len(history) != 1 || history[0].RandomSeed != matchSeed {
+				t.Fatalf("finished match seed = %d, history = %+v", matchSeed, history)
+			}
 		}
 	}
 
@@ -612,6 +621,24 @@ func TestMatchResultCarriesReasonAndTurnsAndIsKeptInHistory(t *testing.T) {
 	if h := history[0]; h.Draw || h.TerminationReason != "TEST_REASON" || h.Turns != 4 || h.SessionID != "s1" ||
 		len(h.WinnerPlayerIDs) != 1 || h.WinnerPlayerIDs[0] != "a" {
 		t.Fatalf("unexpected history entry %+v", h)
+	}
+	recorded := s.history[0]
+	if recorded.Seed == 0 || len(recorded.Actions) != 4 ||
+		len(recorded.RosterOrder) != 2 || recorded.Roles["a"] != game.RolePlayer {
+		t.Fatalf("incomplete replay record: %+v", recorded)
+	}
+	replayed, err := match.ReplayMatch(
+		s.Game,
+		recorded.RosterOrder,
+		recorded.Roles,
+		recorded.Seed,
+		recorded.Actions,
+	)
+	if err != nil {
+		t.Fatalf("ReplayMatch: %v", err)
+	}
+	if replayed.Turns != recorded.Turns {
+		t.Fatalf("replayed turns = %d, want %d", replayed.Turns, recorded.Turns)
 	}
 }
 

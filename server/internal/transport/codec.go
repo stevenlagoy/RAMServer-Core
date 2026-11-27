@@ -243,6 +243,7 @@ type MatchResult struct {
 	Reason            MatchEndReason
 	TerminationReason string // Game-defined, like "CHECKMATE", may be empty
 	Turns             uint32
+	RandomSeed        int64
 }
 
 type PlayerActionSummary struct {
@@ -358,6 +359,7 @@ func matchResultToPB(m MatchResult) *pb.MatchResult {
 		Reason:            m.Reason,
 		TerminationReason: m.TerminationReason,
 		Turns:             m.Turns,
+		RandomSeed:        m.RandomSeed,
 	}
 }
 

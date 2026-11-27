@@ -47,6 +47,10 @@ func (g *StubGame) NewState(rosterOrder []string, roles map[string]game.Role) ga
 	return stubState{order: order, endAfter: endAfter}
 }
 
+func (g *StubGame) NewStateWithSeed(rosterOrder []string, roles map[string]game.Role, _ int64) game.GameState {
+	return g.NewState(rosterOrder, roles)
+}
+
 func (g *StubGame) LegalActions(state game.GameState, memberID string) []game.ActionSpec {
 	for _, id := range g.ActiveTurn(state) {
 		if id == memberID {

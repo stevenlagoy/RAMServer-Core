@@ -33,6 +33,10 @@ func (g *Game) NewState(order []string, roles map[string]game.Role) game.GameSta
 	return newState(players[0], players[1]) // First player to join will play white
 }
 
+func (g *Game) NewStateWithSeed(order []string, roles map[string]game.Role, _ int64) game.GameState {
+	return g.NewState(order, roles)
+}
+
 func (g *Game) Validate(s game.GameState, a game.Action) error {
 	state := s.(State)
 	if isResign(a.Payload) {

@@ -216,6 +216,7 @@ message MatchResult {
   MatchEndReason reason = 5;
   string termination_reason = 6;
   uint32 turns = 7;
+  int64 random_seed = 8; // Only included after match completion.
 }
 
 enum MatchEndReason {

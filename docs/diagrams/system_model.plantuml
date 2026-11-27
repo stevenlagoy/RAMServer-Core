@@ -2,7 +2,7 @@
 package "internal/game" {
     interface Game {
         +Roles() []RoleSpec
-        +NewState(order []string, roles map[string]Role) GameState
+        +NewStateWithSeed(order []string, roles map[string]Role, seed int64) GameState
         +LegalActions(state, memberID) []ActionSpec
         +Validate(state, action) error
         +Apply(state, action) GameState

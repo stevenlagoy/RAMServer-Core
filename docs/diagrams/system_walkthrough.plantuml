@@ -22,7 +22,7 @@ A -> Session: SetReady(true)
 B -> Session: SetReady(true)
 Session -> Game: ReadyToStart(roster, ready)
 Game --> Session: true
-Session -> Match ** : NewMatch(state=Game.NewState(order, roles))
+Session -> Match ** : NewMatch(state=Game.NewStateWithSeed(order, roles, seed))
 Session -> A: StateUpdate(ViewFor A)
 Session -> B: StateUpdate(ViewFor B)
 

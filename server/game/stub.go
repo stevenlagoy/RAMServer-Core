@@ -14,6 +14,10 @@ func (g *StubGame) NewState(rosterOrder []string, roles map[string]Role) GameSta
 	return stubState{}
 }
 
+func (g *StubGame) NewStateWithSeed(rosterOrder []string, roles map[string]Role, _ int64) GameState {
+	return g.NewState(rosterOrder, roles)
+}
+
 func (g *StubGame) LegalActions(state GameState, memberID string) []ActionSpec {
 	return nil
 }

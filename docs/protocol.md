@@ -317,6 +317,7 @@ Usable in any phase. When it answers a specific request, the envelope's `in_repl
 - `reason` - why the match ended; see `MatchEndReason` below.
 - `termination_reason` - the game's own name for how the match ended, such as `CHECKMATE` or `RESIGNATION`. Empty if the game does not give one. `reason` stays a generic category.
 - `turns` - how many actions were applied during the match.
+- `random_seed` - the server-generated seed used for match randomness. It is included only in results for completed matches and their history, so it can be used with the server-recorded action log to replay the match.
 
 **`MatchEndReason`**
 

@@ -17,7 +17,10 @@ func TestMatchFlow(t *testing.T) {
 		"p2": game.RolePlayer,
 	}
 
-	m := NewMatch(g, roster, roles)
+	m, err := NewMatch(g, roster, roles)
+	if err != nil {
+		t.Fatalf("NewMatch: %v", err)
+	}
 
 	if m.Turns != 0 {
 		t.Errorf("expected 0 turns, got %d", m.Turns)
@@ -42,6 +45,16 @@ func TestMatchFlow(t *testing.T) {
 	if m.Turns != 2 {
 		t.Errorf("expected 2 turns, got %d", m.Turns)
 	}
+	if len(m.Actions) != 2 {
+		t.Fatalf("recorded %d actions, want 2", len(m.Actions))
+	}
+	replayed, err := ReplayMatch(g, roster, roles, m.Seed, m.Actions)
+	if err != nil {
+		t.Fatalf("ReplayMatch: %v", err)
+	}
+	if replayed.Turns != m.Turns || !bytes.Equal(replayed.ViewFor("p1"), m.ViewFor("p1")) {
+		t.Error("replayed match differs from the original match")
+	}
 
 	_, ended := m.Outcome()
 	if !ended {
@@ -61,7 +74,10 @@ func TestLegalActions(t *testing.T) {
 		"p1": game.RolePlayer,
 	}
 
-	m := NewMatch(g, roster, roles)
+	m, err := NewMatch(g, roster, roles)
+	if err != nil {
+		t.Fatalf("NewMatch: %v", err)
+	}
 
 	actions := m.LegalActions("p1")
 	if len(actions) == 0 {
@@ -101,9 +117,12 @@ func (g *interruptGame) AllowsOutOfTurn(_ game.GameState, a game.Action) bool {
 
 func TestOutOfTurnActions(t *testing.T) {
 	roles := map[string]game.Role{"p1": game.RolePlayer, "p2": game.RolePlayer}
-	m := NewMatch(&interruptGame{}, []string{"p1", "p2"}, roles) // p1 is active
+	m, err := NewMatch(&interruptGame{}, []string{"p1", "p2"}, roles) // p1 is active
+	if err != nil {
+		t.Fatalf("NewMatch: %v", err)
+	}
 
-	err := m.ApplyAction(game.Action{ActorID: "p2", Payload: []byte("NoOp")})
+	err = m.ApplyAction(game.Action{ActorID: "p2", Payload: []byte("NoOp")})
 	if !errors.Is(err, ErrNotYourTurn) {
 		t.Fatalf("ordinary action out of turn: error = %v, want ErrNotYourTurn", err)
 	}

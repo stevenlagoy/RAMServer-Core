@@ -22,10 +22,10 @@ type Game interface {
 	// Lists every role this game defines, and how many of each a session may hold
 	Roles() []RoleSpec
 
-	// Returns the initial GameState for a fresh Match. rosterOrder lists
-	// participant IDs in a meaningful order (like join order). roles maps
-	// each participant ID to their assigned Role. See StubGame for pattern
-	NewState(rosterOrder []string, roles map[string]Role) GameState
+	// Returns the initial GameState for a fresh Match using the server-supplied seed.
+	// Deterministic games may ignore seed. rosterOrder lists participant IDs in a
+	// meaningful order and roles maps each participant ID to their assigned Role.
+	NewStateWithSeed(rosterOrder []string, roles map[string]Role, seed int64) GameState
 
 	// Returns the actions memberID may currently take. Used to answer clients'
 	// requests for possible moves, and to validate moves before applying them.

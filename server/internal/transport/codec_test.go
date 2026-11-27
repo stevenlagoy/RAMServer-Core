@@ -253,7 +253,8 @@ func TestEncodeMatchResult(t *testing.T) {
 			{PlayerID: "p1", ActionsAccepted: 5, ActionsRejected: 1},
 			{PlayerID: "p2", ActionsAccepted: 4},
 		},
-		Reason: EndForfeit,
+		Reason:     EndForfeit,
+		RandomSeed: 918273,
 	}))
 	if resp.GetInReplyTo() != 0 {
 		t.Fatalf("MatchResult must be unsolicited, got in_reply_to %d", resp.GetInReplyTo())
@@ -261,6 +262,9 @@ func TestEncodeMatchResult(t *testing.T) {
 	m := resp.GetMatchResult()
 	if m.GetSessionId() != "s1" || !slices.Equal(m.GetWinnerPlayerIds(), []string{"p1"}) || m.GetDraw() || m.GetReason() != EndForfeit {
 		t.Fatalf("unexpected match result: %v", m)
+	}
+	if m.GetRandomSeed() != 918273 {
+		t.Fatalf("random_seed = %d, want 918273", m.GetRandomSeed())
 	}
 	sums := m.GetSummaries()
 	if len(sums) != 2 {

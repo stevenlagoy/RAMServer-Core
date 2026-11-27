@@ -7,7 +7,7 @@ hide empty members
 package "game (public plugin API)" {
   interface Game {
     +Roles() []RoleSpec
-    +NewState(rosterOrder, roles) GameState
+    +NewStateWithSeed(rosterOrder, roles, seed) GameState
     +LegalActions(state, memberID) []ActionSpec
     +Validate(state, action) error
     +Apply(state, action) GameState

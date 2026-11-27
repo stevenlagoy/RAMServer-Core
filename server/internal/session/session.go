@@ -28,8 +28,12 @@ type Member struct {
 
 // One completed round for Session history and leaderboards
 type MatchResult struct {
-	Turns  int
-	Result game.MatchResult
+	Turns       int
+	Result      game.MatchResult
+	Seed        int64
+	RosterOrder []string
+	Roles       map[string]game.Role
+	Actions     []game.Action
 }
 
 // Sole actor for everything that happens within: Run goroutine owns members,
@@ -332,7 +336,10 @@ func (s *Session) handleLeave(l *leaveMsg) {
 		return // caller removes Session from store
 	}
 	if s.current == nil && s.readyToStart() {
-		s.startMatch("", 0) // the leaver was the last member not ready
+		if err := s.startMatch("", 0); err != nil { // the leaver was the last member not ready
+			slog.Error("failed to start match", "session_id", s.ID, "error", err)
+			s.broadcastUnsolicitedState()
+		}
 		return
 	}
 	s.broadcastUnsolicitedState()
@@ -360,7 +367,12 @@ func (s *Session) handleSetReady(r *setReadyMsg) {
 	}
 
 	if s.readyToStart() {
-		s.startMatch(r.clientID, r.seq)
+		if err := s.startMatch(r.clientID, r.seq); err != nil {
+			perr := transport.WrapError(transport.CodeInternal, err)
+			perr.SessionID = s.ID
+			member.Sender.Send(transport.EncodeError(r.seq, perr))
+			s.broadcastUnsolicitedState()
+		}
 		return
 	}
 
@@ -379,13 +391,18 @@ func (s *Session) readyToStart() bool {
 
 // Starts the match and broadcasts the first in-progress state. requesterID's copy replies to seq,
 // for the SetReadyRequest that completed readiness; pass "" and 0 when no request caused the start
-func (s *Session) startMatch(requesterID string, seq uint64) {
+func (s *Session) startMatch(requesterID string, seq uint64) error {
 	roles := make(map[string]game.Role, len(s.members))
 	for id, m := range s.members {
 		roles[id] = m.Role
 	}
-	s.current = match.NewMatch(s.Game, append([]string(nil), s.order...), roles) // copy order
+	current, err := match.NewMatch(s.Game, append([]string(nil), s.order...), roles)
+	if err != nil {
+		return err
+	}
+	s.current = current
 	s.broadcastState(requesterID, seq)
+	return nil
 }
 
 func (s *Session) handleSubmit(req *submitMsg) {
@@ -448,14 +465,29 @@ func (s *Session) handleSubmit(req *submitMsg) {
 }
 
 func (s *Session) endMatch(result game.MatchResult) {
-	s.history = append(s.history, MatchResult{Turns: s.current.Turns, Result: result})
-	s.broadcastMatchEnded(result, s.current.Turns)
+	s.history = append(s.history, MatchResult{
+		Turns:       s.current.Turns,
+		Result:      result,
+		Seed:        s.current.Seed,
+		RosterOrder: append([]string(nil), s.current.RosterOrder...),
+		Roles:       cloneRoles(s.current.Roles),
+		Actions:     append([]game.Action(nil), s.current.Actions...),
+	})
+	s.broadcastMatchEnded(result, s.current.Turns, s.current.Seed)
 	s.current = nil
 	for _, m := range s.members {
 		m.Ready = false // require re-ready before next round
 	}
 	s.stateVersion++
 	s.broadcastUnsolicitedState()
+}
+
+func cloneRoles(roles map[string]game.Role) map[string]game.Role {
+	copied := make(map[string]game.Role, len(roles))
+	for id, role := range roles {
+		copied[id] = role
+	}
+	return copied
 }
 
 func (s *Session) handleLegalMoves(l *legalMovesMsg) {
@@ -484,7 +516,7 @@ func (s *Session) handleInfo(i *infoMsg) {
 func (s *Session) handleHistory(h *historyMsg) {
 	matches := make([]transport.MatchResult, len(s.history))
 	for i, r := range s.history {
-		matches[i] = s.transportResult(r.Result, r.Turns)
+		matches[i] = s.transportResult(r.Result, r.Turns, r.Seed)
 	}
 	h.reply <- matches
 }
@@ -548,7 +580,7 @@ func (s *Session) broadcastState(requesterID string, seq uint64) {
 }
 
 // Convert a finished match result to wire form
-func (s *Session) transportResult(result game.MatchResult, turns int) transport.MatchResult {
+func (s *Session) transportResult(result game.MatchResult, turns int, seed int64) transport.MatchResult {
 	// TODO: per-player summaries from the action log, and end reasons other than completion
 	winners := result.GetWinnerIDs()
 	return transport.MatchResult{
@@ -558,12 +590,13 @@ func (s *Session) transportResult(result game.MatchResult, turns int) transport.
 		Reason:            transport.EndCompleted,
 		TerminationReason: string(result.TerminationReason()),
 		Turns:             uint32(turns),
+		RandomSeed:        seed,
 	}
 }
 
-func (s *Session) broadcastMatchEnded(result game.MatchResult, turns int) {
+func (s *Session) broadcastMatchEnded(result game.MatchResult, turns int, seed int64) {
 	// TODO: per-player summaries from the action log, and end reasons other than completion
-	payload := transport.EncodeMatchResult(s.transportResult(result, turns))
+	payload := transport.EncodeMatchResult(s.transportResult(result, turns, seed))
 	for _, m := range s.members {
 		m.Sender.Send(payload) // identical for every recipient, so the slice is shared
 	}
